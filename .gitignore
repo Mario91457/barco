@@ -1,0 +1,10 @@
+**/node_modules/
+**/build/
+**/.gradle/
+**/local.properties
+**/www/
+**/.idea/workspace.xml
+*.apk
+*.aab
+*.elf
+*.hex

@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <style>
+      .hull { fill: #222222; stroke: #3a3a3a; stroke-width: 3; }
+      .cavity { fill: #111111; stroke: #444444; stroke-width: 2.5; }
+      .latch-outer { fill: none; stroke: #444444; stroke-width: 2; }
+      .latch-inner { fill: #222222; stroke: #444444; stroke-width: 1.5; }
+      .latch-dot { fill: #888888; }
+      .screw-hole { fill: #222222; stroke: #666666; stroke-width: 2; }
+      .screw-dot { fill: #ffffff; }
+    </style>
+  </defs>
+
+  <!-- Grupo centrado, rotado 135 grados (-45° + 180°) y reescalado para encajar -->
+  <g transform="translate(256, 256) rotate(135) scale(0.6) translate(-435, -300)">
+    <!-- Casco principal -->
+    <path class="hull" d="
+      M 830, 110 
+      L 290, 110 
+      C 120, 110 40, 195 40, 300 
+      C 40, 405 120, 490 290, 490 
+      L 830, 490 
+      Z" />
+
+    <!-- Compartimento interior -->
+    <rect class="cavity" x="300" y="150" width="480" height="300" rx="3" ry="3" />
+
+    <!-- Pestillo de proa -->
+    <rect class="latch-outer" x="255" y="280" width="30" height="40" rx="3" ry="3" />
+    <path class="latch-inner" d="M 262, 287 L 278, 287 C 282, 287 282, 313 278, 313 L 262, 313 Z" />
+    <circle class="latch-dot" cx="270" cy="300" r="3" />
+
+    <!-- Orificios de tornillos en popa -->
+    <circle class="screw-hole" cx="803" cy="190" r="7" />
+    <circle class="screw-dot" cx="803" cy="190" r="2" />
+
+    <circle class="screw-hole" cx="803" cy="410" r="7" />
+    <circle class="screw-dot" cx="803" cy="410" r="2" />
+  </g>
+</svg>

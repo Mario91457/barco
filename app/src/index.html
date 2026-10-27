@@ -1,0 +1,1229 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+ <meta charset="utf-8"/>
+ <meta content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" name="viewport"/>
+ <title>
+  Control del barco
+ </title>
+ <style>
+ :root {
+   --sal: #EDF1EF;
+   --panel: #FFFFFF;
+   --tinta: #17313B;
+   --tinta-2: #5B727B;
+   --linea: #C9D5D3;
+   --babor: #C4372E;
+   --estribor: #1F8A5B;
+   --boya: #E3A116;
+   --d: min(calc(100vh - 88px), 32vw);
+   /* diámetro de los círculos */
+ }
+ @media (orientation: portrait) {
+   :root {
+     --d: 44vw;
+   }
+ }
+ * {
+   box-sizing: border-box;
+   margin: 0;
+   -webkit-tap-highlight-color: transparent;
+ }
+ html, body {
+   height: 100%;
+ }
+ body {
+   background: var(--sal);
+   color: var(--tinta);
+   font-family: "Roboto Condensed", "sans-serif-condensed", "Arial Narrow", system-ui, sans-serif;
+   display: grid;
+   grid-template-rows: auto 1fr;
+   overscroll-behavior: none;
+   user-select: none;
+   -webkit-user-select: none;
+   -webkit-touch-callout: none;
+   padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+ }
+ button {
+   font: inherit;
+   font-size: 16px;
+   padding: 10px 16px;
+   border: 2px solid var(--tinta);
+   border-radius: 10px;
+   background: var(--panel);
+   color: var(--tinta);
+ }
+ button:active {
+   background: var(--tinta);
+   color: var(--panel);
+ }
+ button:focus-visible, input:focus-visible {
+   outline: 3px solid var(--boya);
+   outline-offset: 2px;
+ }
+ header {
+   display: flex;
+   align-items: center;
+   gap: 8px;
+   padding: 8px 12px;
+ }
+ header button {
+   white-space: nowrap;
+   padding: 8px 10px;
+   font-size: 13px;
+ }
+ @media (max-width: 560px) {
+   header {
+     gap: 5px;
+     padding: 6px 8px;
+   }
+   header button {
+     padding: 7px 8px;
+     font-size: 12px;
+   }
+   .estado {
+     font-size: 13px;
+   }
+ }
+ .estado {
+   flex: 1;
+   display: flex;
+   align-items: center;
+   gap: 8px;
+   color: var(--tinta-2);
+   font-size: 17px;
+ }
+ .punto {
+   width: 10px;
+   height: 10px;
+   border-radius: 50%;
+   background: var(--linea);
+ }
+ .estado.on {
+   color: var(--tinta);
+ }
+ .estado.on .punto {
+   background: var(--estribor);
+ }
+ /* Tres columnas: círculo del acelerador, barco en el centro, círculo de la dirección */
+ main {
+   display: grid;
+   align-items: center;
+   justify-items: center;
+   gap: 12px;
+   min-height: 0;
+   padding: 0 16px 12px;
+   grid-template-columns: var(--d) minmax(0, 1fr) var(--d);
+   grid-template-areas: "thr tel str";
+ }
+ @media (orientation: portrait) {
+   main {
+     grid-template-columns: 1fr 1fr;
+     grid-template-areas: "tel tel" "thr str";
+     align-items: start;
+   }
+ }
+ /* Círculo con un slider que lo cruza por el diámetro. --t (0 a 1) lo escribe el JS */
+ .dial {
+   position: relative;
+   width: var(--d);
+   height: var(--d);
+   --t: 0;
+   --th: calc(var(--d) * .26 - 4px);
+ }
+ .dial.thr {
+   grid-area: thr;
+ }
+ .dial.str {
+   grid-area: str;
+   --t: .5;
+ }
+ .disco {
+   position: absolute;
+   inset: 0;
+   overflow: hidden;
+   border: 2px solid var(--tinta);
+   border-radius: 50%;
+   background: var(--panel);
+ }
+ .thr .nivel {
+   position: absolute;
+   left: 0;
+   right: 0;
+   bottom: 0;
+   height: calc(var(--t) * 100%);
+   background: rgb(227 161 22 / .22);
+ }
+ .str .disco {
+   background: linear-gradient(90deg, rgb(196 55 46 / .10) 50%, rgb(31 138 91 / .10) 50%);
+ }
+ .slider {
+   position: absolute;
+   touch-action: none;
+   overflow: hidden;
+   background: var(--panel);
+   border: 2px solid var(--tinta);
+   border-radius: 10px;
+ }
+ .slider.v {
+   top: 0;
+   bottom: 0;
+   left: 50%;
+   width: calc(var(--th) + 4px);
+   transform: translateX(-50%);
+ }
+ .slider.h {
+   left: 0;
+   right: 0;
+   top: 50%;
+   height: calc(var(--th) + 4px);
+   transform: translateY(-50%);
+ }
+ .slider.h::after {
+   content: "";
+   position: absolute;
+   left: 50%;
+   top: 0;
+   bottom: 0;
+   width: 2px;
+   background: var(--linea);
+   transform: translateX(-1px);
+ }
+ .fill {
+   position: absolute;
+ }
+ .v .fill {
+   left: 0;
+   right: 0;
+   bottom: 0;
+   height: calc(var(--t) * (100% - var(--th)) + var(--th) / 2);
+   background: var(--boya);
+ }
+ .h .fill {
+   top: 0;
+   bottom: 0;
+ }
+ .h .port {
+   background: var(--babor);
+   left: calc(var(--t) * (100% - var(--th)) + var(--th) / 2);
+   right: 50%;
+ }
+ .h .star {
+   background: var(--estribor);
+   left: 50%;
+   right: calc((1 - var(--t)) * (100% - var(--th)) + var(--th) / 2);
+ }
+ .thumb {
+   position: absolute;
+   z-index: 1;
+   background: var(--panel);
+   border: 3px solid var(--tinta);
+   border-radius: 8px;
+ }
+ .v .thumb {
+   left: 0;
+   right: 0;
+   height: var(--th);
+   bottom: calc(var(--t) * (100% - var(--th)));
+ }
+ .h .thumb {
+   top: 0;
+   bottom: 0;
+   width: var(--th);
+   left: calc(var(--t) * (100% - var(--th)));
+ }
+ .lect {
+   position: absolute;
+   display: flex;
+   flex-direction: column;
+   line-height: 1.05;
+   pointer-events: none;
+ }
+ .lect b {
+   font-size: calc(var(--d) * .12);
+   font-weight: 700;
+   font-variant-numeric: tabular-nums;
+ }
+ .lect small {
+   font-size: max(11px, calc(var(--d) * .05));
+   color: var(--tinta-2);
+   white-space: nowrap;
+ }
+ .thr .lect {
+   top: 50%;
+   transform: translateY(-50%);
+ }
+ .thr .izq {
+   right: calc(50% + var(--th) / 2 + 10px);
+   text-align: right;
+ }
+ .thr .der {
+   left: calc(50% + var(--th) / 2 + 10px);
+ }
+ .str .arr {
+   top: 13%;
+   left: 0;
+   right: 0;
+   align-items: center;
+   text-align: center;
+ }
+ .extremos {
+   position: absolute;
+   left: 14%;
+   right: 14%;
+   top: calc(50% + var(--th) / 2 + 14px);
+   display: flex;
+   justify-content: space-between;
+   pointer-events: none;
+   font-size: max(13px, calc(var(--d) * .055));
+ }
+ .extremos span:first-child {
+   color: var(--babor);
+ }
+ .extremos span:last-child {
+   color: var(--estribor);
+ }
+ /* Centro: barco, estado y acciones */
+ .tel {
+   grid-area: tel;
+   display: flex;
+   flex-direction: column;
+   align-items: center;
+   gap: 8px;
+   width: 100%;
+   max-width: min(100%, 340px);
+ }
+ /* El modo Simple usa una zona de velocidad a la izquierda y una de dirección a la derecha,
+      con la vista del barco centrada entre ambas. */
+ .simple-controls {
+   display: none;
+ }
+ .simple-side {
+   display: flex;
+   flex-direction: column;
+   justify-content: flex-start;
+   align-items: stretch;
+   gap: 10px;
+   min-width: 0;
+   width: 100%;
+   max-width: none;
+   align-self: stretch;
+   height: min(78vh, 560px);
+   min-height: 0;
+   padding: clamp(8px, 1.2vw, 14px);
+   border: 1px solid var(--linea);
+   border-radius: 16px;
+   background: var(--panel);
+   box-shadow: 0 3px 12px rgb(23 49 59 / .05);
+ }
+ .simple-speed {
+   grid-area: simple-speed;
+   justify-self: end;
+ }
+ .simple-steering {
+   grid-area: simple-steering;
+   justify-self: start;
+ }
+ .simple-side-title {
+   font-size: 12px;
+   letter-spacing: .1em;
+   font-weight: 800;
+   color: var(--tinta-2);
+   text-align: center;
+ }
+ .simple-speed-value {
+   display: flex;
+   flex-direction: column;
+   align-items: center;
+   gap: 2px;
+   padding: 4px 0 8px;
+ }
+ .simple-speed-value strong {
+   font-size: clamp(28px, 4.8vh, 46px);
+   font-variant-numeric: tabular-nums;
+   line-height: 1;
+ }
+ .simple-speed-value small {
+   font-size: 12px;
+   color: var(--tinta-2);
+ }
+ .simple-actions {
+   display: grid;
+   gap: clamp(8px, 1.1vw, 14px);
+   flex: 1;
+   min-height: 0;
+ }
+ .simple-actions.speed {
+   grid-template-rows: 1fr 1fr;
+ }
+ .simple-actions.direction {
+   grid-template-columns: repeat(2, minmax(0, 1fr));
+ }
+ .simple-control-button, .simple-side button {
+   width: 100%;
+   min-width: 0;
+   min-height: 0;
+   height: 100%;
+   padding: 8px 6px;
+   display: flex;
+   flex-direction: column;
+   align-items: center;
+   justify-content: center;
+   gap: 6px;
+   font-weight: 800;
+   font-size: clamp(14px, 2vw, 18px);
+   line-height: 1.05;
+   border: 0;
+   border-radius: 12px;
+   background: #9EA8AA;
+   color: #FFFFFF;
+   touch-action: none;
+   user-select: none;
+   -webkit-user-select: none;
+ }
+ .simple-control-button:active, .simple-side button:active {
+   background: #879396;
+   color: #FFFFFF;
+ }
+ .simple-control-button .control-arrow, .simple-side button .control-arrow {
+   display: block;
+   font-size: clamp(48px, 9vh, 104px);
+   font-weight: 900;
+   line-height: .9;
+ }
+ .simple-control-button small, .simple-side button small {
+   font-size: clamp(11px, 1.45vw, 14px);
+   font-weight: 800;
+   color: #FFFFFF;
+   letter-spacing: .04em;
+ }
+ .simple-decorative {
+   pointer-events: none;
+   cursor: default;
+ }
+ .simple-decorative:disabled {
+   opacity: 1;
+ }
+ main.modo-simple {
+   grid-template-columns: minmax(0, 1fr) minmax(200px, 1.15fr) minmax(0, 1fr);
+   grid-template-areas: "simple-speed tel simple-steering";
+   gap: clamp(8px, 1.6vw, 20px);
+   padding-left: clamp(8px, 1.5vw, 18px);
+   padding-right: clamp(8px, 1.5vw, 18px);
+ }
+ main.modo-simple .dial {
+   display: none;
+ }
+ main.modo-simple .simple-controls {
+   display: contents;
+ }
+ main.modo-simple .tel {
+   max-width: 100%;
+   gap: 7px;
+ }
+ 
+ main.modo-simple #btnParar {
+   display: none;
+ }
+ main.modo-simple #controlHint {
+   font-size: clamp(12px, 1.6vw, 15px);
+ }
+ main.modo-simple .simple-side {
+   max-height: min(560px, calc(100vh - 100px));
+ }
+ @media (orientation: portrait) {
+   main.modo-simple {
+     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+     grid-template-areas: "tel tel" "simple-speed simple-steering";
+     align-content: center;
+     align-items: stretch;
+     gap: 8px;
+     padding: 4px 8px 8px;
+   }
+   main.modo-simple .tel {
+     grid-area: tel;
+     max-width: none;
+     justify-self: center;
+   }
+   
+   main.modo-simple #controlHint {
+     min-height: 1.8em;
+   }
+   main.modo-simple .simple-side {
+     max-width: none;
+     height: min(52vh, 420px);
+     max-height: none;
+     gap: 7px;
+     padding: 8px;
+   }
+   main.modo-simple .simple-control-button .control-arrow, main.modo-simple .simple-side button .control-arrow {
+     font-size: clamp(32px, 6vh, 64px);
+   }
+   main.modo-simple .simple-control-button small, main.modo-simple .simple-side button small {
+     font-size: 10px;
+   }
+ }
+ 
+ .rosa:focus-visible { outline: 3px solid var(--boya); outline-offset: 3px; border-radius: 50%; }
+
+.datos {
+   display: grid;
+   grid-template-columns: repeat(3, 1fr);
+   gap: 2px;
+   width: 100%;
+   text-align: center;
+ }
+ .datos small {
+   display: block;
+   font-size: 12px;
+   color: var(--tinta-2);
+ }
+ .datos b {
+   font-size: 19px;
+   font-variant-numeric: tabular-nums;
+ }
+ .acciones {
+   display: grid;
+   grid-template-columns: 1fr 1fr;
+   gap: 6px;
+   width: 100%;
+ }
+ .acciones button {
+   font-size: 13px;
+   padding: 8px 4px;
+   white-space: nowrap;
+ }
+ .parar {
+   width: 100%;
+   background: var(--tinta);
+   color: var(--panel);
+   font-weight: 700;
+   font-size: 18px;
+   padding: 12px;
+ }
+ .parar:active {
+   background: var(--boya);
+   color: var(--tinta);
+ }
+ #aviso {
+   min-height: 1.2em;
+   font-size: 13px;
+   color: var(--tinta-2);
+   text-align: center;
+ }
+ #controlHint {
+   min-height: 2.6em;
+   font-size: 15px;
+   color: var(--tinta-2);
+   text-align: center;
+   line-height: 1.4;
+ }
+ #controlHint small {
+   font-size: 12px;
+ }
+ .autopilot {
+   width:100%;
+   display:grid;
+   grid-template-columns:1fr 1fr;
+   gap:6px;
+   margin-top:2px;
+ }
+ .autopilot button {
+   padding:8px 6px;
+   font-size:12px;
+   font-weight:800;
+ }
+ .autopilot button.active {
+   background:var(--estribor);
+   color:#fff;
+   border-color:var(--estribor);
+ }
+ .autopilot button:disabled {
+   opacity:.45;
+ }
+ dialog {
+   /* El reset global pone margin: 0; hay que restaurar el centrado nativo. */
+   position: fixed;
+   inset: 0;
+   margin: auto;
+   width: min(92vw, 460px);
+   max-height: 90vh;
+   max-height: min(90vh, 90dvh);
+   overflow: auto;
+   padding: 18px;
+   border: 2px solid var(--tinta);
+   border-radius: 14px;
+   background: var(--panel);
+   color: var(--tinta);
+ }
+ dialog::backdrop {
+   background: rgb(23 49 59 / .45);
+ }
+ dialog h2 {
+   font-size: 22px;
+   margin-bottom: 6px;
+ }
+ .ayuda {
+   font-size: 15px;
+   color: var(--tinta-2);
+   margin-bottom: 10px;
+ }
+ .campo {
+   display: flex;
+   align-items: center;
+   gap: 10px;
+   padding: 9px 0;
+   border-bottom: 1px solid var(--linea);
+   font-size: 17px;
+ }
+ .campo label, .campo > span {
+   flex: 1;
+ }
+ .campo input[type=number] {
+   width: 84px;
+   font: inherit;
+   font-size: 18px;
+   padding: 6px 8px;
+   text-align: right;
+   border: 2px solid var(--tinta);
+   border-radius: 8px;
+ }
+ .campo input[type=checkbox] {
+   width: 24px;
+   height: 24px;
+   accent-color: var(--tinta);
+ }
+ .campo button {
+   font-size: 14px;
+   padding: 6px 10px;
+ }
+ .pie {
+   display: flex;
+   justify-content: flex-end;
+   gap: 8px;
+   margin-top: 14px;
+ }
+ .disp {
+   display: flex;
+   flex-direction: column;
+   align-items: flex-start;
+   gap: 5px;
+   width: 100%;
+   margin: 8px 0;
+   padding: 14px;
+   text-align: left;
+   border: 1px solid var(--linea);
+   border-radius: 12px;
+   background: var(--sal);
+ }
+ .disp b {
+   font-size: 16px;
+ }
+ .disp small {
+   color: var(--tinta-2);
+   font-size: 13px;
+ }
+ .disp:active small {
+   color: var(--panel);
+ }
+ .disp::before {
+   content: "DISPOSITIVO BLUETOOTH";
+   color: var(--tinta-2);
+   font-size: 10px;
+   letter-spacing: .08em;
+ }
+ .dispTools {
+   display:flex;
+   align-items:center;
+   gap:8px;
+   margin: 12px 0;
+ }
+ .dispTools p {
+   flex:1;
+   color:var(--tinta-2);
+   font-size:13px;
+ }
+ .dispTools button {
+   font-size:13px;
+   padding:8px 10px;
+ }
+ .btBadge {
+   display:inline-flex;
+   align-items:center;
+   gap:8px;
+   padding:6px 10px;
+   border:1px solid var(--linea);
+   border-radius:999px;
+   font-size:12px;
+   color:var(--tinta-2);
+   background:var(--panel);
+ }
+ .btBadge::before {
+   content:"";
+   width:7px;
+   height:7px;
+   border-radius:50%;
+   background:var(--estribor);
+ }
+ .slider {
+   touch-action: none;
+   -webkit-user-select:none;
+   user-select:none;
+ }
+
+ /* ---------- Ajuste compacto: toda la cabina cabe en la pantalla ---------- */
+ html, body {
+   width: 100%;
+   height: 100%;
+   overflow: hidden;
+ }
+ body {
+   height: 100vh;  /* fallback para WebViews antiguas */
+   height: 100dvh;
+   min-height: 0;
+   grid-template-rows: auto minmax(0, 1fr);
+ }
+ :root {
+   --d: min(calc(100dvh - 76px), 30vw);
+ }
+ header {
+   min-width: 0;
+   padding: 5px 8px;
+   gap: 6px;
+ }
+ .estado {
+   min-width: 0;
+   overflow: hidden;
+   gap: 6px;
+   font-size: 14px;
+ }
+ #estadoTxt {
+   min-width: 0;
+   overflow: hidden;
+   white-space: nowrap;
+   text-overflow: ellipsis;
+ }
+ header button {
+   padding: 6px 8px;
+   font-size: 12px;
+ }
+ main {
+   min-width: 0;
+   min-height: 0;
+   overflow: hidden;
+   grid-template-rows: minmax(0, 1fr);
+   gap: 8px;
+   padding: 0 10px 6px;
+ }
+ .tel {
+   min-width: 0;
+   gap: 5px;
+ }
+
+.datos small { font-size: 11px; }
+ .datos b { font-size: 17px; }
+ .parar {
+   padding: 7px 8px;
+   font-size: 15px;
+ }
+ .autopilot {
+   gap: 5px;
+   margin-top: 0;
+ }
+ .autopilot button {
+   padding: 6px 4px;
+   font-size: 11px;
+ }
+ #aviso {
+   min-height: 0;
+   font-size: 11px;
+   line-height: 1.1;
+ }
+ #controlHint {
+   min-height: 0;
+   font-size: 12px;
+   line-height: 1.15;
+ }
+ #controlHint small { font-size: 11px; }
+ .simple-side {
+   min-height: 0;
+   gap: 7px;
+   padding: 8px;
+ }
+
+ @media (orientation: portrait) {
+   :root { --d: min(42vw, 22dvh); }
+   header { padding: 4px 6px; gap: 4px; }
+   header button { padding: 6px 6px; font-size: 11px; }
+   .estado { font-size: 12px; gap: 5px; }
+   .punto { width: 8px; height: 8px; flex: 0 0 8px; }
+   main:not(.modo-simple) {
+     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+     grid-template-rows: auto minmax(0, 1fr);
+     grid-template-areas: "tel tel" "thr str";
+     align-content: stretch;
+     align-items: center;
+     justify-items: center;
+     gap: 4px;
+     padding: 2px 8px 6px;
+   }
+   main:not(.modo-simple) .dial {
+     width: min(var(--d), calc((100vw - 24px) / 2));
+     height: auto;
+     aspect-ratio: 1;
+     --th: clamp(24px, 6vw, 34px);
+   }
+   main:not(.modo-simple) .tel {
+     max-width: 100%;
+     gap: 3px;
+   }
+
+main:not(.modo-simple) #controlHint {
+     min-height: 0;
+     font-size: clamp(10px, 1.45dvh, 12px);
+     line-height: 1.05;
+   }
+   main:not(.modo-simple) #controlHint small { font-size: inherit; }
+   main:not(.modo-simple) .parar {
+     padding: 5px 8px;
+     font-size: clamp(12px, 1.8dvh, 14px);
+   }
+   main:not(.modo-simple) .autopilot button {
+     padding: 5px 3px;
+     font-size: clamp(9px, 1.35dvh, 11px);
+     line-height: 1.05;
+   }
+   main:not(.modo-simple) .lect b { font-size: calc(var(--d) * .105); }
+   main:not(.modo-simple) .lect small { font-size: 10px; }
+   main:not(.modo-simple) .extremos { font-size: 11px; }
+
+   main.modo-simple {
+     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+     grid-template-rows: auto minmax(0, 1fr);
+     grid-template-areas: "tel tel" "simple-speed simple-steering";
+     align-content: stretch;
+     align-items: stretch;
+     gap: 6px;
+     padding: 2px 7px 6px;
+   }
+   main.modo-simple .tel {
+     grid-area: tel;
+     max-width: 100%;
+     gap: 3px;
+     justify-self: center;
+   }
+
+main.modo-simple #controlHint {
+     min-height: 0;
+     font-size: clamp(10px, 1.45dvh, 12px);
+     line-height: 1.05;
+   }
+   main.modo-simple #controlHint small { font-size: inherit; }
+   main.modo-simple .autopilot { gap: 4px; }
+   main.modo-simple .autopilot button {
+     padding: 5px 3px;
+     font-size: clamp(9px, 1.35dvh, 11px);
+     line-height: 1.05;
+   }
+   main.modo-simple .simple-side {
+     height: 100%;
+     max-height: none;
+     min-height: 0;
+     gap: 5px;
+     padding: 6px;
+     border-radius: 12px;
+   }
+   main.modo-simple .simple-side-title { font-size: 10px; }
+   main.modo-simple .simple-speed-value { padding: 1px 0 3px; }
+   main.modo-simple .simple-speed-value strong { font-size: clamp(22px, 4dvh, 32px); }
+   main.modo-simple .simple-speed-value small { font-size: 10px; }
+   main.modo-simple .simple-actions { gap: 5px; }
+   main.modo-simple .simple-control-button,
+   main.modo-simple .simple-side button {
+     padding: 4px 3px;
+     gap: 3px;
+     border-radius: 9px;
+     font-size: clamp(12px, 1.8dvh, 15px);
+   }
+   main.modo-simple .simple-control-button .control-arrow,
+   main.modo-simple .simple-side button .control-arrow {
+     font-size: clamp(28px, 5.3dvh, 48px);
+   }
+   main.modo-simple .simple-control-button small,
+   main.modo-simple .simple-side button small { font-size: 9px; }
+ }
+
+ /* En móviles apaisados, prioriza mantener los dos diales y el panel central visibles. */
+ @media (orientation: landscape) and (max-height: 500px) {
+   :root { --d: min(calc(100dvh - 54px), 28vw); }
+   header { padding: 3px 7px; }
+   header button { padding: 5px 7px; }
+   main { gap: 6px; padding: 0 8px 4px; }
+   .tel { gap: 2px; }
+
+#controlHint { font-size: 10px; line-height: 1.05; }
+   #controlHint small { font-size: 9px; }
+   .parar { padding: 4px; font-size: 12px; }
+   .autopilot { gap: 3px; }
+   .autopilot button { padding: 4px 3px; font-size: 9px; }
+   #aviso { font-size: 9px; }
+   .simple-side { height: calc(100% - 2px); max-height: none; gap: 4px; padding: 5px; }
+   .simple-control-button .control-arrow, .simple-side button .control-arrow { font-size: clamp(24px, 7dvh, 38px); }
+   .simple-control-button, .simple-side button { padding: 4px 3px; gap: 2px; }
+ }
+
+/* Ajustes finales: instrumentos compactos y SVG del barco sin recorte vertical. */
+
+.tel { overflow: visible; }
+
+.simple-stop { pointer-events: auto; cursor: pointer; }
+ .simple-stop:active { background: var(--babor); }
+
+ /* ---------- Instrumentos arcade: nudos | rumbo (el bote gira) | pitch y roll ---------- */
+ .instrumentos {
+   display: grid;
+   grid-template-columns: minmax(0, 1fr) minmax(0, 1.18fr) minmax(0, 1fr);
+   align-items: end;
+   gap: clamp(3px, .8vw, 8px);
+   width: 100%;
+   max-width: 420px;
+   padding-top: 2px;
+ }
+ .inst {
+   display: flex;
+   flex-direction: column;
+   align-items: center;
+   min-width: 0;
+   gap: 1px;
+   text-align: center;
+   line-height: 1.05;
+ }
+ .inst-dial {
+   width: min(100%, 24vh);
+   width: min(100%, 24dvh);
+ }
+ .inst-rumbo .inst-dial {
+   width: min(100%, 28vh);
+   width: min(100%, 28dvh);
+ }
+ .inst-dial svg {
+   display: block;
+   width: 100%;
+   height: auto;
+   overflow: visible;
+   filter: drop-shadow(0 2px 0 rgb(23 49 59 / .22));
+ }
+ .rosa {
+   cursor: pointer;
+   touch-action: manipulation;
+ }
+ .inst-val {
+   font-size: clamp(11px, 1.9vh, 14px);
+   font-size: clamp(11px, 1.9dvh, 14px);
+   font-weight: 800;
+   font-variant-numeric: tabular-nums;
+   white-space: nowrap;
+ }
+ .inst-est {
+   max-width: 100%;
+   overflow: hidden;
+   text-overflow: ellipsis;
+   white-space: nowrap;
+   font-size: 8px;
+   color: var(--tinta-2);
+ }
+ #speedStatus.online, #yawStatus.online, #attStatus.online { color: var(--estribor); }
+
+</style>
+</head>
+<body>
+ <header>
+  <span class="estado" id="estado">
+   <i class="punto">
+   </i>
+   <span id="estadoTxt">
+    Sin conexi&oacute;n
+   </span>
+  </span>
+  <button id="btnModo" type="button">
+   Cambiar a Simple
+  </button>
+  <button id="btnConectar" type="button">
+   Conectar
+  </button>
+  <button id="btnAjustes" type="button">
+   Ajustes
+  </button>
+ </header>
+ <main id="main">
+  <div class="dial thr">
+   <div class="disco">
+    <div class="nivel">
+    </div>
+   </div>
+   <div class="slider v" id="thr">
+    <div class="fill">
+    </div>
+    <div class="thumb">
+    </div>
+   </div>
+   <div class="lect izq">
+    <small>
+     Acelerador
+    </small>
+   </div>
+   <div class="lect der">
+    <b id="thrPct">
+     0%
+    </b>
+    <small id="thrPot">
+     pot. 0
+    </small>
+   </div>
+  </div>
+  <section class="tel">
+   <div aria-label="Instrumentos del barco" class="instrumentos">
+    <div class="inst inst-nudos" title="Velocidad estimada por el MPU6500, en nudos; puede derivar">
+     <div class="inst-dial" id="instNudos"></div>
+     <strong class="inst-val" id="speedValue">— kt</strong>
+     <small class="inst-est" id="speedStatus">Sin datos</small>
+    </div>
+    <div aria-live="polite" class="inst inst-rumbo" title="Yaw relativo del MPU6500: gira el bote; toca el bote para poner el cero visual">
+     <div class="inst-dial" id="instRumbo"></div>
+     <strong class="inst-val" id="yawValue">—°</strong>
+     <small class="inst-est" id="yawStatus">Sin conexión</small>
+    </div>
+    <div class="inst inst-actitud" title="Pitch y roll estimados a partir de la gravedad del acelerómetro MPU6500; pueden desviarse durante aceleraciones y olas">
+     <div class="inst-dial" id="instActitud"></div>
+     <strong class="inst-val" id="attValue">P —° R —°</strong>
+     <small class="inst-est" id="attStatus">Sin datos</small>
+    </div>
+   </div>
+   <p id="controlHint">
+    Control manual
+    <br/>
+    <small>
+     Desliza para avanzar y girar
+    </small>
+   </p>
+   <button class="parar" id="btnParar">
+    Parar motor
+   </button>
+   <div aria-label="Control de orientaci&oacute;n" class="autopilot">
+    <button aria-pressed="false" id="btnPID" type="button">
+     PID: DESACTIVADO
+    </button>
+    <button aria-pressed="false" id="btnCrucero" type="button">
+     Crucero: DESACTIVADO
+    </button>
+   </div>
+   <p id="aviso">
+   </p>
+  </section>
+  <div class="dial str">
+   <div class="disco">
+   </div>
+   <div class="slider h" id="str">
+    <div class="fill port">
+    </div>
+    <div class="fill star">
+    </div>
+    <div class="thumb">
+    </div>
+   </div>
+   <div class="lect arr">
+    <b id="strAng">
+     90&deg;
+    </b>
+    <small>
+     &aacute;ngulo del servo
+    </small>
+   </div>
+   <div class="extremos">
+    <span>
+     Babor
+    </span>
+    <span>
+     Estribor
+    </span>
+   </div>
+  </div>
+  <section aria-label="Controles simples" class="simple-controls" id="simpleControls">
+   <div class="simple-side simple-speed">
+    <p class="simple-side-title">
+     VELOCIDAD
+    </p>
+    <div class="simple-speed-value">
+     <strong>
+      20
+     </strong>
+     <small>
+      potencia fija
+     </small>
+    </div>
+    <div class="simple-actions speed">
+     <button aria-label="Mantener para avanzar" class="simple-control-button" id="simpleForward" type="button">
+      <span aria-hidden="true" class="control-arrow">
+       ▲
+      </span>
+      <small>
+       AVANZAR
+      </small>
+     </button>
+     <button aria-label="Detener el motor" class="simple-control-button simple-stop" id="simpleDecelerate" type="button">
+      <span aria-hidden="true" class="control-arrow">▼</span>
+      <small>DETENER</small>
+     </button>
+    </div>
+   </div>
+   <div class="simple-side simple-steering">
+    <p class="simple-side-title">
+     DIRECCI&Oacute;N
+    </p>
+    <div class="simple-actions direction">
+     <button aria-label="Mantener para girar a babor" id="simpleLeft" type="button">
+      <span aria-hidden="true" class="control-arrow">
+       ◀
+      </span>
+      <small>
+       BABOR
+      </small>
+     </button>
+     <button aria-label="Mantener para girar a estribor" id="simpleRight" type="button">
+      <span aria-hidden="true" class="control-arrow">
+       ▶
+      </span>
+      <small>
+       ESTRIBOR
+      </small>
+     </button>
+    </div>
+   </div>
+  </section>
+ </main>
+ <dialog id="ajustes" tabindex="-1">
+  <h2 data-dialog-focus autofocus tabindex="-1">
+   Ajustes
+  </h2>
+  <p class="ayuda">
+   En Avanzado, los valores del variador y del servo van de 0 a 180, como en
+   <code>
+    write()
+   </code>
+   . En Simple, la potencia es fija.
+  </p>
+  <div class="campo">
+   <label for="maxPower">
+    Velocidad m&aacute;xima
+   </label>
+   <input id="maxPower" inputmode="numeric" type="number"/>
+  </div>
+  <div class="campo">
+   <label for="minStart">
+    Arranque m&iacute;nimo
+   </label>
+   <input id="minStart" inputmode="numeric" type="number"/>
+  </div>
+  <div class="campo">
+   <label for="angLeft">
+    Servo a babor
+   </label>
+   <input id="angLeft" inputmode="numeric" type="number"/>
+   <button data-probar="0">
+    Probar
+   </button>
+  </div>
+  <div class="campo">
+   <label for="angCenter">
+    Servo al centro
+   </label>
+   <input id="angCenter" inputmode="numeric" type="number"/>
+   <button data-probar="0.5">
+    Probar
+   </button>
+  </div>
+  <div class="campo">
+   <label for="angRight">
+    Servo a estribor
+   </label>
+   <input id="angRight" inputmode="numeric" type="number"/>
+   <button data-probar="1">
+    Probar
+   </button>
+  </div>
+  <h3 style="margin-top:14px">
+   Control PID de rumbo
+  </h3>
+  <p class="ayuda">
+   P, I y D se env&iacute;an al Arduino. Empieza con I bajo o en 0.
+  </p>
+  <div class="campo">
+   <label for="pidP">
+    Constante P
+   </label>
+   <input id="pidP" inputmode="decimal" max="50" min="0" step="0.1" type="number"/>
+  </div>
+  <div class="campo">
+   <label for="pidI">
+    Constante I
+   </label>
+   <input id="pidI" inputmode="decimal" max="10" min="0" step="0.01" type="number"/>
+  </div>
+  <div class="campo">
+   <label for="pidD">
+    Constante D
+   </label>
+   <input id="pidD" inputmode="decimal" max="50" min="0" step="0.1" type="number"/>
+  </div>
+  <div class="campo">
+   <span>
+    Calibrar giroscopio (barco inm&oacute;vil)
+   </span>
+   <button id="btnCalibrar" type="button">
+    Calibrar
+   </button>
+  </div>
+  <label class="campo">
+   <span>
+    El acelerador vuelve a 0 al soltar
+   </span>
+   <input id="throttleSpring" type="checkbox"/>
+  </label>
+  <div class="pie">
+   <button id="btnReset">
+    Restablecer
+   </button>
+   <button id="btnCerrar">
+    Listo
+   </button>
+  </div>
+ </dialog>
+ <dialog id="dispositivos" tabindex="-1">
+  <h2 data-dialog-focus autofocus tabindex="-1">
+   Conectar dispositivo
+  </h2>
+  <p class="ayuda">
+   Selecciona el HC-06 en la lista de dispositivos emparejados. Si no aparece, empareja el m&oacute;dulo desde los ajustes Bluetooth de Android.
+  </p>
+  <div class="dispTools">
+   <p id="estadoLista">
+    Dispositivos emparejados
+   </p>
+   <button id="btnActualizarDisp" type="button">
+    Actualizar
+   </button>
+  </div>
+  <div id="lista">
+   <p class="ayuda">
+    Cargando dispositivos&hellip;
+   </p>
+  </div>
+  <div class="pie">
+   <button id="btnCerrarDisp">
+    Cancelar
+   </button>
+  </div>
+ </dialog>
+ <script src="/main.js" type="module">
+ </script>
+</body>

@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Barco</string>
+    <string name="title_activity_main">Barco</string>
+    <string name="package_name">com.mario.barco</string>
+    <string name="custom_url_scheme">com.mario.barco</string>
+</resources>

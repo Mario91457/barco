@@ -1,0 +1,23 @@
+{
+  "name": "barco",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Control de barco RC mediante Capacitor y Bluetooth serie clásico",
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "watch:android": "powershell -NoProfile -ExecutionPolicy Bypass -File ../scripts/watch-android-build.ps1",
+    "deploy:android": "powershell -NoProfile -ExecutionPolicy Bypass -File ../scripts/actualizar-app-android.ps1",
+    "postinstall": "node ../scripts/patch-bluetooth-gradle.mjs"
+  },
+  "dependencies": {
+    "@ascentio-it/capacitor-bluetooth-serial": "^8.0.1",
+    "@capacitor/android": "^8.5.3",
+    "@capacitor/cli": "^8.5.3",
+    "@capacitor/core": "^8.5.3"
+  },
+  "devDependencies": {
+    "@capacitor/assets": "^3.0.5",
+    "vite": "^6.0.0"
+  }
+}
