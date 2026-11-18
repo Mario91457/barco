@@ -9,8 +9,6 @@ Aplicación para controlar el barco y firmware para la placa Arduino. La app per
 3. Abre el archivo en tu teléfono Android y confirma la instalación. Si Android pregunta, permite instalar apps desde el navegador o administrador de archivos que estés usando.
 4. Abre **Barco** y conéctate al HC-06 desde la app.
 
-El APK usa el identificador `com.mario.barco`, igual que la app anterior. Android solo permite actualizarla si ambas versiones están firmadas con la misma clave. Si aparece un error de firma, tendrás que desinstalar la app instalada antes de instalar el APK nuevo; eso borra sus datos.
-
 ### Si Android bloquea la instalación: usar ADB
 
 Google está desplegando gradualmente la verificación de desarrolladores. La primera etapa comenzó el 30 de septiembre de 2026 en Brasil, Indonesia, Singapur y Tailandia para instalaciones desde tiendas participantes; la expansión global está prevista para 2027. La documentación oficial mantiene ADB como opción para instalar y probar APKs no registrados. Este método instala la app en un teléfono conectado; no registra la app para distribuirla ampliamente.
@@ -34,14 +32,7 @@ En una computadora con Windows:
    ```powershell
    .\adb.exe install -r .\Barco-v1.0.2.apk
    ```
-
-Si aparece `INSTALL_FAILED_UPDATE_INCOMPATIBLE`, hay instalada una versión con otra firma. Desinstálala una sola vez y vuelve a instalar; esto borra los datos guardados de esa app:
-
-```powershell
-.\adb.exe uninstall com.mario.barco
-.\adb.exe install .\Barco-v1.0.2.apk
-```
-
+   
 Cuando termines, puedes desactivar **Depuración por USB**. Consulta la [guía oficial de ADB](https://developer.android.com/tools/adb), la guía para [activar la depuración](https://developer.android.com/studio/debug/dev-options), las [preguntas frecuentes de verificación de Android](https://developer.android.com/developer-verification/guides/faq) y el [anuncio de Google](https://developer.android.com/blog/posts/android-developer-verification-building-a-safer-ecosystem-together?hl=es-419).
 
 ## Cargar el programa del barco
