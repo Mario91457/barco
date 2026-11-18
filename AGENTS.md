@@ -1,41 +1,51 @@
-# AGENTS.md — Barco RC V1 estable
+# Guía de trabajo para Barco RC
 
-## Fuente de verdad
-- Firmware activo: `firmware/arduino/barco_control/barco_control.ino`.
-- App: `app/src/index.html`, `app/src/main.js`, `app/src/instrumentos.js`, `app/src/assets/barco.svg`.
-- Test que se debe conservar: `firmware/arduino/tests/prueba_pwm_hardware_vs_servo/prueba_pwm_hardware_vs_servo.ino`.
-- Prueba de escritorio del protocolo: `firmware/arduino/tests/host_protocolo/` (mocks; no sustituye al hardware).
-- Diagnóstico histórico: `docs/firmware/diagnostico_tirones_mpu6500.md`.
+## Fuentes activas
 
-## Hardware/pines que no se deben cambiar sin autorización
-- Arduino Uno / ATmega328P a 16 MHz.
+- App: `app/src/index.html`, `app/src/main.js`, `app/src/instrumentos.js` y `app/src/assets/barco.svg`.
+- Proyecto Android/Capacitor: `app/android/` y `app/capacitor.config.json`.
+- Firmware: `firmware/arduino/barco_control/barco_control.ino`.
+- Prueba host del protocolo: `firmware/arduino/tests/host_protocolo/` (mocks; no sustituye hardware).
+- Prueba PWM que debe conservarse: `firmware/arduino/tests/prueba_pwm_hardware_vs_servo/prueba_pwm_hardware_vs_servo.ino`.
+- Documentación para participantes: `README.md`; mantenimiento/compilación: `docs/GUIA_TECNICA.md`; guía del firmware: `docs/GUIA_FIRMWARE.md`.
+- `docs/referencia-app-web-v1/`, `docs/README_ESTABLE_V1.md` y `docs/firmware/diagnostico_tirones_mpu6500.md` son referencias históricas, no fuentes activas.
+
+Antes de cambiar app o firmware, revisa este archivo y la documentación relacionada. Edita `app/src/`, no `app/www/`, que se genera al compilar.
+
+## Restricciones de hardware
+
+- Hardware objetivo: Arduino Uno / ATmega328P a 16 MHz.
 - HC-06: D5 RX y D6 TX de NeoSWSerial a 9600 baudios.
-- ESC D9 (OC1A), servo D10 (OC1B), MPU6500 SDA=A4/SCL=A5/I²C `0x68`.
-- Timer1 hace PWM de 50 Hz y está reservado; no reintroducir `Servo.h` ni usar otra función que configure Timer1.
-- Muestreo MPU: `MPU_SAMPLE_DIVIDER=0x04` (~200 Hz); la actualización de yaw está en `5000UL`. Gyro a ±500 °/s (`MPU_GYRO_CONFIG_VALUE=0x08`, `GYRO_LSB_PER_DPS=65.5`).
-- Watchdog del AVR activo tras `setup()` (500 ms): `loop()` debe llamar a `wdt_reset()` y cualquier bloqueo largo (como `CAL`) también. Si se añade código bloqueante, alimentar el watchdog dentro del bucle.
+- ESC: D9 / OC1A. Servo: D10 / OC1B. MPU6500: SDA=A4, SCL=A5, I²C `0x68`.
+- Timer1 está reservado para PWM de 50 Hz. No reintroducir `Servo.h`, `analogWrite()` en D9/D10 ni otra función que configure Timer1.
+- Muestreo MPU: `MPU_SAMPLE_DIVIDER=0x04` (~200 Hz); yaw se actualiza cada `5000UL`. Gyro a ±500 °/s (`MPU_GYRO_CONFIG_VALUE=0x08`, `GYRO_LSB_PER_DPS=65.5`).
+- El watchdog AVR está activo tras `setup()` (500 ms). `loop()` debe llamar `wdt_reset()` y los bucles bloqueantes, como `CAL`, deben alimentarlo.
+- No cambies pines, orientación/ejes del MPU ni signos sin autorización y sin seguir la prueba de banco del README.
+- Pruebas del motor siempre sin hélice. `ESC_BIDIRECTIONAL` debe coincidir con el variador real.
 
-## Protocolo app ↔ Arduino
-- Simple (bytes sueltos, sin LF/CR y sin checksum, compatibilidad con Arduino Bluetooth Control): `F`, `S`, `L`, `G`, `R`, `H`; `C` centra. `F` avanza a potencia 20 y centra; `S` detiene; `L/G` babor y `R/H` estribor con potencia 20. Los comandos de línea no deben empezar por `F S L G R H C` salvo `HOLD`, `CAL` y `CRU`, porque esos bytes se interceptan al inicio de línea.
-- Avanzado: líneas `<orden>*<HH>\n` (HH = XOR hex de la orden; `enviarLinea()` de `main.js` lo añade a toda orden de más de un carácter). Órdenes: `P<n>`, `D<n>`, `PID,0/1`, `CRU,0/1`, `HOLD`, `KP/KI/KD,<n>`, `CAL`, `TEL,0/1`. El firmware descarta líneas sin checksum válido.
-- Configuración app→firmware, reenviada cada 5 s y sin renovar el failsafe: `ANG,centro,babor,estribor` (calibración del servo; el firmware la usa en C/F/L/R/HOLD/failsafe/PID) y `PMAX,n` (tope de potencia).
-- Telemetría: `TEL,0/1`; paquete único `T,yaw,pitch,roll,velocidad_decimas_m_s`. No se implementan los formatos antiguos `Y<n>`/`V<n>`.
-- Al conectar la app apaga siempre `PID,0` y `CRU,0`.
+## Protocolo que debe conservarse
+
+- La app actual usa en ambos modos líneas `<orden>*<HH>\n`, con XOR hexadecimal de la orden; `enviarLinea()` añade el checksum. Control manual: `P<n>` y `D<n>`.
+- Crucero actual: `CRU,1,KP=<n>,KI=<n>,KD=<n>` aplica ganancias y activa el mantenimiento de rumbo como una sola orden; `CRU,0` lo desactiva. El firmware valida checksum y valores antes de cambiar estado. Si ya está activo, actualizar ganancias conserva el rumbo objetivo.
+- Configuración enviada al conectar y cada 5 s: `ANG,centro,babor,estribor` y `PMAX,n`. No renueva el failsafe.
+- `HOLD` captura rumbo cuando se solicita. `CAL` detiene el motor y calibra bias gyro Z. Telemetría: `TEL,0/1`; trama `T,yaw,pitch,roll,velocidad_decimas_m_s`.
+- Telemetría permanece separada del control y no activa, renueva ni desactiva el failsafe.
+- Compatibilidad heredada obligatoria: bytes sueltos sin LF/CR/checksum `F`, `S`, `L`, `G`, `R`, `H`; `C` centra. `F` avanza a potencia 20 y centra; `S` detiene; `L/G` babor y `R/H` estribor con potencia 20. Son órdenes puntuales: no activan ni renuevan el failsafe avanzado. No se deben enviar esos bytes desde la app actual ni cambiar su significado. `S` siempre detiene el motor.
+- No volver a introducir comandos avanzados antiguos `PID` o `KP/KI/KD` por separado como activación del controlador. Los bytes simples heredados no son esos comandos.
 
 ## Estimación inercial
-- Convención: yaw>0 = proa a estribor (horario), pitch>0 = proa arriba, roll>0 = estribor abajo. `MPU_YAW_SIGN`/`MPU_PITCH_SIGN`/`MPU_ROLL_SIGN` (1 o −1) adaptan el montaje sin tocar las fórmulas; confirmar con la prueba de banco del README antes de cambiarlos.
-- Yaw se integra del gyro Z y deriva al no haber magnetómetro.
-- Pitch/roll usan únicamente las fórmulas del acelerómetro del firmware anterior proporcionado por el usuario; no añadir fusión complementaria gyro X/Y sin pedirlo.
-- La velocidad integra la aceleración longitudinal filtrada y NO compensa la proyección de gravedad: inclinar el casco la altera y puede dispararla. Es una limitación conocida y pendiente, no un criterio de aceptación.
-- El eje longitudinal y su signo se configuran con `MPU_FORWARD_ACCEL_AXIS` y `MPU_FORWARD_ACCEL_SIGN`. Confirmar orientación física antes de cambiar los ejes.
 
-## Seguridad y validación
-- Pruebas del motor siempre sin hélice hasta confirmar señales de parada. `ESC_BIDIRECTIONAL` debe coincidir con el variador real.
-- No afirmar que el firmware está probado en hardware: se compiló con avr-gcc 7.3 contra ArduinoCore-avr 1.8.8 y NeoSWSerial, y el protocolo se ejecutó en PC con mocks, pero la ausencia de tirones, los signos y el failsafe reales requieren pruebas físicas.
-- Después de cambiar firmware, compilar para Uno y repetir la prueba de banco del README (signos, PID, parada, reinicio por watchdog).
-- Documentación operativa en `README_ES.md`; mantenerla concisa y actual.
+- Signos: yaw positivo = proa a estribor/horario; pitch positivo = proa arriba; roll positivo = estribor abajo. Yaw integra gyro Z y deriva porque no hay magnetómetro.
+- Pitch y roll usan las fórmulas restauradas del acelerómetro. No añadir fusión gyro X/Y ni compensación de gravedad sin autorización.
+- La velocidad integra aceleración longitudinal filtrada y no compensa la gravedad; inclinar el casco puede alterarla. Es una estimación, no velocidad GPS.
+- Los ejes/signos se adaptan con `MPU_FORWARD_ACCEL_AXIS`, `MPU_FORWARD_ACCEL_SIGN` y `MPU_*_SIGN`, previa verificación física.
 
-## Convención de signos de actitud (versión restaurada)
-- Se restauró el sketch anterior proporcionado por el usuario. Pitch/roll usan directamente las fórmulas del acelerómetro de ese archivo.
-- No añadir compensación de gravedad ni fusionar pitch/roll con el giroscopio como parte de esta reversión.
+## Cambios y validación
 
+- Conserva la prueba PWM y los mocks de protocolo. No elimines compatibilidad heredada al limpiar/refactorizar.
+- Tras cambios al firmware, ejecuta la prueba host y compila para Uno; después sigue la prueba de banco del README. Las pruebas de PC no prueban el hardware.
+- No afirmes ausencia de tirones, signos correctos o failsafe real sin prueba física. La prueba del motor requiere hélice retirada.
+- No incluyas cachés, APKs, salidas generadas, credenciales ni configuración local. Revisa `git status` antes de preparar un commit.
+- La app usa el ID de prueba `com.mario.barco.test`. El flujo `.github/workflows/android-release.yml` crea el APK y adjunta el `.ino` activo y un ZIP de sketch en etiquetas `v*`; nunca guardes el keystore ni contraseñas de firma en el repositorio. El flujo no carga firmware a una placa.
+- No publiques, subas firmware ni instales APK en dispositivos como parte de una tarea de documentación, salvo que el usuario lo solicite expresamente.
+- Mantén `README.md`, `docs/GUIA_TECNICA.md` y `docs/GUIA_FIRMWARE.md` consistentes.

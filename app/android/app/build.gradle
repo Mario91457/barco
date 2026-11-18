@@ -1,14 +1,18 @@
 apply plugin: 'com.android.application'
 
+def barcoVersionCode = providers.gradleProperty('barcoVersionCode').getOrElse('1').toInteger()
+def barcoVersionName = providers.gradleProperty('barcoVersionName').getOrElse('2.0')
+def barcoKeystorePath = System.getenv('BARCO_KEYSTORE_PATH')
+
 android {
-    namespace = "com.mario.barco"
+    namespace = "com.mario.barco.test"
     compileSdk = rootProject.ext.compileSdkVersion
     defaultConfig {
-        applicationId "com.mario.barco"
+        applicationId "com.mario.barco.test"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        versionCode barcoVersionCode
+        versionName barcoVersionName
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -16,10 +20,23 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    signingConfigs {
+        barcoRelease {
+            if (barcoKeystorePath) {
+                storeFile file(barcoKeystorePath)
+                storePassword System.getenv('BARCO_KEYSTORE_PASSWORD')
+                keyAlias System.getenv('BARCO_KEY_ALIAS')
+                keyPassword System.getenv('BARCO_KEY_PASSWORD')
+            }
+        }
+    }
     buildTypes {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            if (barcoKeystorePath) {
+                signingConfig signingConfigs.barcoRelease
+            }
         }
     }
 }

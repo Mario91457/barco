@@ -1,5 +1,7 @@
 # Barco RC — V1 estable (Arduino Uno + app Android)
 
+> Documento histórico de la versión V1. Algunas rutas y comandos de protocolo aquí descritos ya no corresponden a la app/firmware activos. Usa `README.md`, `AGENTS.md` y `docs/GUIA_FIRMWARE.md` como fuentes actuales.
+
 Proyecto para controlar el barco mediante Arduino Uno/ATmega328P, ESC, servo, MPU6500, HC-06 y una app Android hecha con Capacitor.
 
 ## Componentes esenciales

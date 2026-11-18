@@ -1,31 +1,32 @@
-# Estado compartido del proyecto
+# Estado del proyecto
 
-Actualizado: 2026-10-27
+Actualizado: 2026-11-17
 
-## Fuente activa
+## Fuentes activas
 
-- App Android: `app/src/` y el proyecto nativo `app/android/`.
+- App Android: `app/src/` y el proyecto Capacitor `app/android/`.
+- El ID de la instalación de prueba es `com.mario.barco.test`.
 - Firmware Arduino Uno: `firmware/arduino/barco_control/barco_control.ino`.
-- La app web en `docs/referencia-app-web-v1/` se conserva como referencia V1; no se sincroniza con Android.
+- Pruebas del firmware: `firmware/arduino/tests/`; guía: `docs/GUIA_FIRMWARE.md`.
+- Documentación para usuarios y colaboradores: `README.md` y `AGENTS.md`.
 
 ## Automatizaciones
 
-- `scripts/actualizar-app-android.cmd` compila, instala y abre la app en un teléfono conectado.
-- `scripts/cargar-firmware.cmd` compila y carga el firmware; solicita confirmar que se retiró la hélice.
-- `app/` contiene `watch:android` para reconstruir el APK después de cambios en `app/src/`.
-- `scripts/patch-bluetooth-gradle.mjs` adapta la dependencia Bluetooth a la configuración ProGuard que acepta Gradle actual; se ejecuta durante la instalación y antes de compilar.
+- `scripts/actualizar-app-android.cmd` o `npm run deploy:android` compila, instala y abre el APK de depuración en un teléfono conectado.
+- `npm run watch:android` genera un APK al inicio y al detectar cambios en `app/src/`, sin instalarlo.
+- `scripts/cargar-firmware.cmd` lista `.ino` de la carpeta configurada, compila el seleccionado y exige confirmación antes de cargarlo.
+- `scripts/patch-bluetooth-gradle.mjs` adapta el plugin Bluetooth a la configuración ProGuard que requiere el Gradle actual.
+- `.github/workflows/android-release.yml` compila y publica el APK firmado, el `.ino` y un ZIP del sketch en Releases cuando se sube una etiqueta `v*`; necesita los secretos de firma descritos en `docs/GUIA_TECNICA.md`.
 
-## Última verificación conocida
+## Validación conocida
 
-- El despliegue Android había fallado al evaluar la dependencia Bluetooth por `proguard-android.txt`. Se añadió la corrección automática a `proguard-android-optimize.txt`.
-- La compilación posterior no quedó confirmada: el intento desde el entorno de Codex se detuvo porque Gradle no pudo comunicarse con su daemon.
-- No hay confirmación de instalación en teléfono ni de pruebas físicas del Arduino/ESC.
+- La app web/Android se ha compilado y el APK de prueba se ha instalado y abierto en un teléfono.
+- La compilación automática para Releases está preparada, pero no se ha ejecutado en GitHub ni se han configurado allí los secretos de firma.
+- El firmware se ha compilado para Uno y el protocolo se ha ejecutado en PC con mocks. Los mocks no sustituyen al hardware.
+- No hay verificación física de ESC, servo, signos del MPU, ausencia de tirones ni failsafe real.
 
-## Pendientes para retomar
+## Antes de publicar
 
-1. Ejecutar `npm run deploy:android` desde `app/` y registrar el resultado de compilación e instalación.
-2. Cuando se conecte el hardware, seguir `docs/GUIA_FIRMWARE.md` y las precauciones de `AGENTS.md`; probar sin hélice.
-
-## Registro de tareas
-
-Al completar trabajo significativo, añadir una entrada breve con fecha, resumen, rama/PR, verificaciones y pendientes. No copiar aquí conversaciones completas.
+- Revisa `git status` y los cambios previos de app/firmware antes de crear commits; excluye configuración local, credenciales y artefactos.
+- Ejecuta las instrucciones de validación de `README.md` y `docs/GUIA_FIRMWARE.md` que correspondan a los cambios.
+- La publicación a GitHub y la validación física del barco siguen siendo tareas separadas.

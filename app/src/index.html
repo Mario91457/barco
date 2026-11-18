@@ -373,16 +373,17 @@
    font-weight: 800;
    font-size: clamp(14px, 2vw, 18px);
    line-height: 1.05;
-   border: 0;
+   border: 2px solid #52749A;
    border-radius: 12px;
-   background: #9EA8AA;
+   background: #274F7C;
    color: #FFFFFF;
    touch-action: none;
    user-select: none;
    -webkit-user-select: none;
  }
  .simple-control-button:active, .simple-side button:active {
-   background: #879396;
+   background: #274F7C;
+   border-color: #52749A;
    color: #FFFFFF;
  }
  .simple-control-button .control-arrow, .simple-side button .control-arrow {
@@ -506,7 +507,8 @@
    color: var(--tinta);
  }
  #aviso {
-   min-height: 1.2em;
+   display:none;
+   min-height:0;
    font-size: 13px;
    color: var(--tinta-2);
    text-align: center;
@@ -524,10 +526,12 @@
  .autopilot {
    width:100%;
    display:grid;
-   grid-template-columns:1fr 1fr;
+   grid-template-columns:repeat(2, minmax(0, 1fr));
    gap:6px;
    margin-top:2px;
  }
+ .autopilot button { width:100%; min-height:28px; padding-top:2px; padding-bottom:2px; display:flex; align-items:center; justify-content:center; text-align:center; }
+ #gyroDrift { grid-column:1 / -1; justify-self:center; width:100%; min-height:1.2em; margin:0; font-size:11px; line-height:1.15; text-align:center; }
  .autopilot button {
    padding:8px 6px;
    font-size:12px;
@@ -706,6 +710,75 @@
  header button {
    padding: 6px 8px;
    font-size: 12px;
+ }
+ #panelRegistros {
+   width: min(96vw, 1200px);
+   height: min(88vh, 760px);
+   height: min(88dvh, 760px);
+   max-height: 92dvh;
+   display: none;
+   padding: 16px;
+ }
+ #panelRegistros[open] { display: flex; flex-direction: column; gap: 12px; }
+ .registros-cabecera { display: flex; align-items: center; gap: 12px; }
+ .registros-cabecera h2 { flex: 1; font-size: 20px; }
+ .registros-grid {
+   display: grid;
+   grid-template-columns: repeat(3, minmax(0, 1fr));
+   gap: 10px;
+   flex: 1;
+   min-height: 0;
+ }
+ .registro-seccion {
+   display: flex;
+   flex-direction: column;
+   min-width: 0;
+   min-height: 0;
+   gap: 8px;
+   padding: 10px;
+   border: 1px solid var(--linea);
+   border-radius: 12px;
+   background: var(--sal);
+ }
+ .registro-seccion h3 { font-size: 14px; }
+ .registro-lista {
+   list-style: none;
+   display: flex;
+   flex-direction: column;
+   align-items: stretch;
+   gap: 4px;
+   width: 100%;
+   margin: 0;
+   padding: 0;
+   min-height: 0;
+   flex: 1;
+   overflow: auto;
+   overscroll-behavior: contain;
+   user-select: text;
+   -webkit-user-select: text;
+ }
+ .registro-fila {
+   display: grid;
+   grid-template-columns: auto minmax(0, 1fr);
+   align-items: start;
+   gap: 6px;
+   width: 100%;
+   min-width: 0;
+   padding: 4px 6px;
+   border-radius: 6px;
+   background: var(--panel);
+   font-size: 11px;
+   line-height: 1.25;
+ }
+ .registro-fila time { color: var(--tinta-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
+ .registro-fila code { min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+ .registro-error { color: #a32120; }
+ .registro-warn { color: #835400; }
+ @media (max-width: 700px) {
+   #panelRegistros { height: min(94dvh, 900px); padding: 10px; }
+   .registros-grid { grid-template-columns: 1fr; grid-template-rows: repeat(3, minmax(0, 1fr)); }
+   .registro-seccion { gap: 5px; padding: 7px; }
+   .registro-seccion h3 { font-size: 12px; }
  }
  main {
    min-width: 0;
@@ -1010,12 +1083,13 @@ main.modo-simple #controlHint {
     Parar motor
    </button>
    <div aria-label="Control de orientaci&oacute;n" class="autopilot">
-    <button aria-pressed="false" id="btnPID" type="button">
-     PID: DESACTIVADO
-    </button>
     <button aria-pressed="false" id="btnCrucero" type="button">
      Crucero: DESACTIVADO
     </button>
+    <button id="btnCalibrar" type="button">
+     Calibrar
+    </button>
+    <p aria-live="polite" class="ayuda" id="gyroDrift" title="Cambio angular entre las dos últimas lecturas del giroscopio">Drift: —° · Sin conexión</p>
    </div>
    <p id="aviso">
    </p>
@@ -1054,12 +1128,8 @@ main.modo-simple #controlHint {
      VELOCIDAD
     </p>
     <div class="simple-speed-value">
-     <strong>
-      20
-     </strong>
-     <small>
-      potencia fija
-     </small>
+     <strong id="simplePowerValue">20</strong>
+     <small id="simplePowerHint">potencia configurada</small>
     </div>
     <div class="simple-actions speed">
      <button aria-label="Mantener para avanzar" class="simple-control-button" id="simpleForward" type="button">
@@ -1101,16 +1171,32 @@ main.modo-simple #controlHint {
    </div>
   </section>
  </main>
+ <dialog aria-label="Telemetría y consola" id="panelRegistros" tabindex="-1">
+  <div class="registros-cabecera">
+   <h2 data-dialog-focus tabindex="-1">Telemetría y consola</h2>
+   <button id="btnCerrarRegistros" type="button">Cerrar</button>
+  </div>
+  <div class="registros-grid">
+   <section aria-label="Telemetría recibida del barco" class="registro-seccion">
+    <h3>Telemetría recibida del barco</h3>
+    <ol class="registro-lista" id="registroRecibido"></ol>
+   </section>
+   <section aria-label="Telemetría enviada al barco" class="registro-seccion">
+    <h3>Telemetría enviada al barco</h3>
+    <ol class="registro-lista" id="registroEnviado"></ol>
+   </section>
+   <section aria-label="Salida de consola" class="registro-seccion">
+    <h3>Salida de consola y errores</h3>
+    <ol class="registro-lista" id="registroConsola"></ol>
+   </section>
+  </div>
+ </dialog>
  <dialog id="ajustes" tabindex="-1">
   <h2 data-dialog-focus autofocus tabindex="-1">
    Ajustes
   </h2>
   <p class="ayuda">
-   En Avanzado, los valores del variador y del servo van de 0 a 180, como en
-   <code>
-    write()
-   </code>
-   . En Simple, la potencia es fija.
+   Simple y Avanzado comparten la potencia m&aacute;xima, los &aacute;ngulos del servo y las ganancias de crucero.
   </p>
   <div class="campo">
    <label for="maxPower">
@@ -1161,27 +1247,19 @@ main.modo-simple #controlHint {
    <label for="pidP">
     Constante P
    </label>
-   <input id="pidP" inputmode="decimal" max="50" min="0" step="0.1" type="number"/>
+   <input id="pidP" inputmode="decimal" type="number"/>
   </div>
   <div class="campo">
    <label for="pidI">
     Constante I
    </label>
-   <input id="pidI" inputmode="decimal" max="10" min="0" step="0.01" type="number"/>
+   <input id="pidI" inputmode="decimal" type="number"/>
   </div>
   <div class="campo">
    <label for="pidD">
     Constante D
    </label>
-   <input id="pidD" inputmode="decimal" max="50" min="0" step="0.1" type="number"/>
-  </div>
-  <div class="campo">
-   <span>
-    Calibrar giroscopio (barco inm&oacute;vil)
-   </span>
-   <button id="btnCalibrar" type="button">
-    Calibrar
-   </button>
+   <input id="pidD" inputmode="decimal" type="number"/>
   </div>
   <label class="campo">
    <span>
@@ -1190,6 +1268,9 @@ main.modo-simple #controlHint {
    <input id="throttleSpring" type="checkbox"/>
   </label>
   <div class="pie">
+   <button id="btnRegistros" type="button">
+    Registros
+   </button>
    <button id="btnReset">
     Restablecer
    </button>

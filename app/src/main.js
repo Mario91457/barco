@@ -11,43 +11,121 @@ import { crearRumboBote, crearVelocimetroNudos, crearHorizonteArcade } from './i
 (() => {
     'use strict';
     /*
-     * El control se envía app -> Arduino; la telemetría de retorno se activa bajo demanda.
-     * SIMPLE: F avanza, S detiene, L/G giran a babor y R/H a estribor; los giros aplican potencia fija.
-     * AVANZADO: P<potencia>\n y D<angulo>\n. En crucero, HOLD captura el yaw al soltar el timón.
-     * Telemetría combinada: T,yaw,pitch,roll,velocidad_en_décimas_de_m_s\n.
-     * Se transmite un solo paquete a un máximo de 4 Hz. La velocidad y pitch/roll son estimaciones inerciales.
+     * Simple y Avanzado comparten el protocolo comprobado P/D. Los caracteres F/S/L/G/R/H
+     * quedan reservados para aplicaciones heredadas. La telemetría es un canal separado.
      */
-    /** Valores por defecto alineados con el firmware Arduino. */
-    const DEFAULTS = {
-        maxPower: 20,
-        minStart: 3,
-        angLeft: 130,
-        angCenter: 90,
-        angRight: 70,
-        throttleSpring: true, // Por seguridad, el acelerador avanzado vuelve a cero al soltar.
-        pidP: 2.0, pidI: 0.0, pidD: 0.4
-    };
+    const APP_CONFIG = Object.freeze({
+        defaults: Object.freeze({
+            maxPower: 20, minStart: 3, angLeft: 130, angCenter: 90, angRight: 70,
+            throttleSpring: true, pidP: 2.0, pidI: 0.0, pidD: 0.4
+        }),
+        limits: Object.freeze({
+            maxPower: [1, 180], minStart: [0, 179],
+            angLeft: [0, 180], angCenter: [0, 180], angRight: [0, 180]
+        }),
+        valueRanges: Object.freeze({ power: [0, 180], servo: [0, 180] }),
+        pidLimits: Object.freeze({ pidP: [0, 50], pidI: [0, 10], pidD: [0, 50] }),
+        pidSteps: Object.freeze({ pidP: 0.1, pidI: 0.01, pidD: 0.1 }),
+        timing: Object.freeze({
+            commandMinMs: 90, activeRefreshMs: 750, controlPollMs: 35,
+            telemetryReadPollMs: 100, telemetryStaleMs: 1800,
+            telemetryRetryMs: 1600, telemetryRetryCheckMs: 500,
+            telemetryMaxRetries: 8, configurationRefreshMs: 5000,
+            consoleRows: 60, noticeClearMs: 4000
+        }),
+        telemetry: Object.freeze({
+            maxSpeedMps: 5.0, knotsPerMps: 1.943844, maxSpeedKt: 10,
+            yawRange: [-180, 180], pitchRange: [-90, 90], rollRange: [-180, 180], speedDeciRange: [0, 50]
+        }),
+        visual: Object.freeze({ maxSteeringDegrees: 28 }),
+        simpleDirection: Object.freeze({ port: -1, center: 0, starboard: 1 }),
+        protocol: Object.freeze({
+            lineEnding: '\n',
+            commands: Object.freeze({
+                power: value => `P${value}`,
+                direction: value => `D${value}`,
+                hold: 'HOLD', calibration: 'CAL', cruiseOff: 'CRU,0',
+                cruiseOn: cfg => `CRU,1,KP=${cfg.pidP.toFixed(1)},KI=${cfg.pidI.toFixed(2)},KD=${cfg.pidD.toFixed(1)}`,
+                telemetryOn: 'TEL,1', telemetryOff: 'TEL,0',
+                servoAngles: cfg => `ANG,${cfg.angCenter},${cfg.angLeft},${cfg.angRight}`,
+                powerLimit: cfg => `PMAX,${cfg.maxPower}`
+            })
+        })
+    });
+    const DEFAULTS = APP_CONFIG.defaults;
     const STORAGE_KEY = 'barco.cfg.v2';
-    const LIMITES = {
-        maxPower: [1, 180], minStart: [0, 179],
-        angLeft: [0, 180], angCenter: [0, 180], angRight: [0, 180]
-    };
-    const SEND_MIN_MS = 90; // limita el número de comandos mientras se arrastran sliders
-    const REFRESH_ACTIVE_MS = 750; // margen inferior al failsafe de 1600 ms del firmware
-    const POLL_MS = 35;
-    const YAW_READ_POLL_MS = 100;       // Solo consulta el buffer local si las notificaciones no están disponibles
-    const TELEMETRY_STALE_MS = 1800;   // Paquete combinado: latido cada 1 s
-    const SPEED_GAUGE_MAX_MPS = 5.0;    // Máximo aceptado: 5 m/s, expresado por el firmware en décimas
-    const KNOTS_PER_MPS = 1.943844;     // 1 m/s = 1,943844 nudos
-    const SPEED_GAUGE_MAX_KT = 10;      // Escala del velocímetro: 5 m/s ≈ 9,7 kt
-    const YAW_MAX_REQUEST_RETRIES = 8;  // Cubre el armado/calibración inicial bloqueante del firmware
+    const LIMITES = APP_CONFIG.limits;
+    const SIMPLE = APP_CONFIG.simpleDirection;
+    const COMMAND = APP_CONFIG.protocol.commands;
+    const TELEMETRY = APP_CONFIG.telemetry;
+    const INTERVAL = APP_CONFIG.timing;
     const $ = s => document.querySelector(s);
     const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+
+    function checksumXor(orden) {
+        let xor = 0;
+        for (let i = 0; i < orden.length; i++)
+            xor ^= orden.charCodeAt(i) & 0xff;
+        return xor.toString(16).padStart(2, '0').toUpperCase();
+    }
+    function prepararLinea(orden) {
+        const contenido = String(orden).replace(/[\r\n]+$/g, '');
+        return `${contenido}*${checksumXor(contenido)}${APP_CONFIG.protocol.lineEnding}`;
+    }
+
+    const filasRegistros = {
+        received: $('#registroRecibido'), sent: $('#registroEnviado'), console: $('#registroConsola')
+    };
+    const registros = { received: [], sent: [], console: [] };
+    function textoDeConsola(valor) {
+        if (valor instanceof Error)
+            return valor.stack || `${valor.name}: ${valor.message}`;
+        if (typeof valor === 'string')
+            return valor;
+        try { return JSON.stringify(valor); }
+        catch { return String(valor); }
+    }
+    function agregarRegistro(tipo, texto) {
+        const lista = filasRegistros[tipo];
+        if (!lista)
+            return;
+        const caja = lista.closest('.registro-lista');
+        const estabaAlFinal = caja.scrollHeight - caja.scrollTop - caja.clientHeight < 12;
+        const hora = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+        const fila = document.createElement('li');
+        fila.className = `registro-fila ${tipo === 'console' ? 'registro-' + (texto.nivel || 'log') : ''}`;
+        const marca = document.createElement('time');
+        marca.textContent = hora;
+        const contenido = document.createElement('code');
+        contenido.textContent = typeof texto === 'string' ? texto : texto.mensaje;
+        fila.append(marca, contenido);
+        lista.append(fila);
+        registros[tipo].push(fila);
+        if (registros[tipo].length > APP_CONFIG.timing.consoleRows) {
+            registros[tipo].shift().remove();
+        }
+        if (estabaAlFinal)
+            caja.scrollTop = caja.scrollHeight;
+    }
+    const metodosConsola = ['log', 'info', 'warn', 'error', 'debug'];
+    for (const metodo of metodosConsola) {
+        const original = console[metodo].bind(console);
+        console[metodo] = (...argumentos) => {
+            original(...argumentos);
+            agregarRegistro('console', { nivel: metodo, mensaje: argumentos.map(textoDeConsola).join(' ') });
+        };
+    }
+    window.addEventListener('error', evento => agregarRegistro('console', {
+        nivel: 'error', mensaje: `${evento.message || 'Error de ejecución'}${evento.filename ? ` · ${evento.filename}:${evento.lineno}` : ''}`
+    }));
+    window.addEventListener('unhandledrejection', evento => agregarRegistro('console', {
+        nivel: 'error', mensaje: `Promesa rechazada: ${textoDeConsola(evento.reason)}`
+    }));
 
     // Instrumentos SVG (src/instrumentos.js). El rumbo crea #boatCompass y #casco; el anillo con
     // números queda fijo y solo gira el bote. Los cuatro instrumentos vienen del paquete T combinado.
     crearRumboBote($('#instRumbo'));
-    const velocimetro = crearVelocimetroNudos($('#instNudos'), { maxKt: SPEED_GAUGE_MAX_KT });
+    const velocimetro = crearVelocimetroNudos($('#instNudos'), { maxKt: APP_CONFIG.telemetry.maxSpeedKt });
     const horizonte = crearHorizonteArcade($('#instActitud'));
 
     /** Abre un dialogo centrado y enfoca su titulo para no abrir el teclado movil. */
@@ -66,6 +144,19 @@ import { crearRumboBote, crearVelocimetroNudos, crearHorizonteArcade } from './i
         }
     }
     catch { }
+    for (const [key, [minimo, maximo]] of Object.entries(LIMITES)) {
+        const valor = Number(cfg[key]);
+        cfg[key] = Number.isFinite(valor) ? clamp(Math.round(valor), minimo, maximo) : DEFAULTS[key];
+    }
+    for (const key of ['pidP', 'pidI', 'pidD']) {
+        const valor = Number(cfg[key]);
+        const paso = APP_CONFIG.pidSteps[key];
+        const decimales = String(paso).split('.')[1]?.length || 0;
+        cfg[key] = Number.isFinite(valor)
+            ? Number(clamp(valor, ...APP_CONFIG.pidLimits[key]).toFixed(decimales))
+            : DEFAULTS[key];
+    }
+    cfg.throttleSpring = Boolean(cfg.throttleSpring);
     const BT = Capacitor.isNativePlatform() ? BluetoothSerial : null;
     let modo = 'avanzado';
     let conectado = false;
@@ -76,19 +167,19 @@ import { crearRumboBote, crearVelocimetroNudos, crearHorizonteArcade } from './i
     let ultimaPotenciaEnviada = null;
     let ultimoEnvio = 0;
     let simpleAceleradorActivo = false;
-    let simpleDireccionActiva = ''; // L o R en protocolo heredado; también accionan el motor
-    let ultimoEnvioAceleradorSimple = 0;
-    let ultimoEnvioDireccionSimple = 0;
+    let simpleDireccionActiva = SIMPLE.center;
     let prioridadDireccion = true;
     let colaEnvio = Promise.resolve();
     let enviosPendientes = 0;
-    let pidActivo = false;
     let cruceroActivo = false;
     let lectorYawHandle = null;
     let notificacionesYawActivas = false;
     let recepcionYawSolicitada = false;
     let bufferYaw = '';
     let yawActual = null; // yaw integrado real recibido del Arduino; no se modifica al poner cero visual
+    let yawAnteriorDelta = null;
+    let deltaYawReciente = null;
+    let calibracionPendienteConfirmacion = false;
     let velocidadEstimadaMps = null; // Estimación inercial, no una velocidad real calibrada
     let yawOffsetVisual = 0;
     let ceroVisualPendiente = false;
@@ -106,15 +197,18 @@ import { crearRumboBote, crearVelocimetroNudos, crearHorizonteArcade } from './i
     /** Serializa escrituras para impedir que dos gestos mezclen bytes de comandos. */
     function enviarLinea(linea, address = direccionActual) {
         enviosPendientes++;
+        const trama = prepararLinea(linea);
         const ejecutar = async () => {
             if (!BT) {
-                console.log('[Bluetooth simulador -> barco]', JSON.stringify(linea));
+                agregarRegistro('sent', trama.trim());
+                console.log('[Bluetooth simulador -> barco]', JSON.stringify(trama));
                 return true;
             }
             if (!address)
                 return false;
             try {
-                await BT.write({ address, value: linea });
+                agregarRegistro('sent', trama.trim());
+                await BT.write({ address, value: trama });
                 return true;
             }
             catch (e) {
@@ -125,6 +219,15 @@ import { crearRumboBote, crearVelocimetroNudos, crearHorizonteArcade } from './i
         const tarea = colaEnvio.then(ejecutar, ejecutar);
         colaEnvio = tarea.then(() => undefined, () => undefined);
         return tarea.finally(() => { enviosPendientes = Math.max(0, enviosPendientes - 1); });
+    }
+    async function enviarConfiguracionFirmware(address = direccionActual) {
+        const ordenes = [COMMAND.servoAngles(cfg), COMMAND.powerLimit(cfg)];
+        for (const orden of ordenes) {
+            const ok = await enviarLinea(orden, address);
+            if (!ok)
+                return false;
+        }
+        return true;
     }
     /** ---------- Sliders del modo Avanzado: cada control rastrea su puntero ---------- */
     function crearSlider(el, { origen, snap = 0, volver, alSoltar = null }) {
@@ -186,22 +289,22 @@ import { crearRumboBote, crearVelocimetroNudos, crearHorizonteArcade } from './i
     function direccionDesdePosicion(t) {
         if (t < 0.5) {
             const fraccion = (0.5 - t) * 2;
-            return clamp(Math.round(cfg.angCenter + (cfg.angLeft - cfg.angCenter) * fraccion), 0, 180);
+            return clamp(Math.round(cfg.angCenter + (cfg.angLeft - cfg.angCenter) * fraccion), ...APP_CONFIG.valueRanges.servo);
         }
         const fraccion = (t - 0.5) * 2;
-        return clamp(Math.round(cfg.angCenter + (cfg.angRight - cfg.angCenter) * fraccion), 0, 180);
+        return clamp(Math.round(cfg.angCenter + (cfg.angRight - cfg.angCenter) * fraccion), ...APP_CONFIG.valueRanges.servo);
     }
     /** Al soltar el timón en crucero: termina el giro manual y captura el yaw actual. */
     async function soltarDireccionEnCrucero(posicionFinal) {
         if (modo !== 'avanzado' || !conectado || !cruceroActivo)
             return;
         const direccionFinal = direccionDesdePosicion(posicionFinal);
-        const okDireccion = await enviarLinea(`D${direccionFinal}\n`);
+        const okDireccion = await enviarLinea(COMMAND.direction(direccionFinal));
         if (!okDireccion) {
             perderConexion();
             return;
         }
-        const okHold = await enviarLinea('HOLD\n');
+        const okHold = await enviarLinea(COMMAND.hold);
         if (!okHold) {
             perderConexion();
             return;
@@ -221,14 +324,23 @@ import { crearRumboBote, crearVelocimetroNudos, crearHorizonteArcade } from './i
         const direccion = direccionDesdePosicion(timon.valor());
         const acelerador = acel.valor();
         const piso = Math.min(cfg.minStart, cfg.maxPower);
-        const potencia = acelerador <= 0 ? 0 : clamp(Math.round(piso + (cfg.maxPower - piso) * acelerador), 0, 180);
+        const potencia = acelerador <= 0 ? 0 : clamp(Math.round(piso + (cfg.maxPower - piso) * acelerador), ...APP_CONFIG.valueRanges.power);
         return { direccion, potencia };
     }
-    const GIRO_VISUAL_MAX = 28; // grados visuales simétricos; no altera la calibración del servo
+    function valoresSimples() {
+        const direccion = simpleDireccionActiva === SIMPLE.port ? cfg.angLeft
+            : simpleDireccionActiva === SIMPLE.starboard ? cfg.angRight : cfg.angCenter;
+        const accionado = simpleAceleradorActivo || simpleDireccionActiva !== SIMPLE.center;
+        return { direccion, potencia: accionado ? cfg.maxPower : 0 };
+    }
+    function valoresControl() {
+        return modo === 'simple' ? valoresSimples() : valoresAvanzados();
+    }
+    const GIRO_VISUAL_MAX = APP_CONFIG.visual.maxSteeringDegrees; // no altera la calibración del servo
     function anguloVisualSimple() {
-        if (simpleDireccionActiva === 'L')
+        if (simpleDireccionActiva === SIMPLE.port)
             return -GIRO_VISUAL_MAX; // babor: proa hacia la izquierda
-        if (simpleDireccionActiva === 'R')
+        if (simpleDireccionActiva === SIMPLE.starboard)
             return GIRO_VISUAL_MAX; // estribor: proa hacia la derecha
         return 0;
     }
@@ -243,11 +355,17 @@ import { crearRumboBote, crearVelocimetroNudos, crearHorizonteArcade } from './i
     function anguloYawVisual() {
         return yawActual === null ? null : normalizarAngulo(yawActual - yawOffsetVisual);
     }
+    function pintarDerivaGiroscopio(estado = '') {
+        const valor = deltaYawReciente === null
+            ? '—°'
+            : `${deltaYawReciente > 0 ? '+' : ''}${deltaYawReciente.toFixed(1)}°`;
+        $('#gyroDrift').textContent = `Drift: ${valor}${estado ? ` · ${estado}` : ''}`;
+    }
     function actualizarOrientacionBote(anguloVisual) {
         // El offset solo pertenece a la interfaz: nunca se envía al Arduino ni
         // modifica rumboObjetivo del PID. Al perder la telemetría se usa el mando.
         const yawFresco = yawActual !== null &&
-            (Date.now() - ultimaTelemetriaYawMs) <= TELEMETRY_STALE_MS;
+            (Date.now() - ultimaTelemetriaYawMs) <= APP_CONFIG.timing.telemetryStaleMs;
         const angulo = yawFresco
             ? anguloYawVisual()
             : normalizarAngulo(anguloVisual - anguloManualVisualCero);
@@ -260,8 +378,16 @@ import { crearRumboBote, crearVelocimetroNudos, crearHorizonteArcade } from './i
         }
         yawActual = yaw;
         ultimaTelemetriaYawMs = Date.now();
+        if (yawAnteriorDelta !== null) {
+            let delta = yaw - yawAnteriorDelta;
+            if (delta > 180) delta -= 360;
+            if (delta < -180) delta += 360;
+            deltaYawReciente = delta;
+        }
+        yawAnteriorDelta = yaw;
         const yawVisible = anguloYawVisual();
         $('#yawValue').textContent = `${yawVisible > 0 ? '+' : ''}${yawVisible}°`;
+        pintarDerivaGiroscopio();
         $('#yawStatus').textContent = 'MPU activo';
         $('#yawStatus').classList.add('online');
         actualizarOrientacionBote(modo === 'simple' ? anguloVisualSimple() : anguloVisualAvanzado());
@@ -292,15 +418,18 @@ import { crearRumboBote, crearVelocimetroNudos, crearHorizonteArcade } from './i
     });
     function limpiarYaw(estado = 'Sin conexión') {
         yawActual = null;
+        yawAnteriorDelta = null;
+        deltaYawReciente = null;
         ultimaTelemetriaYawMs = 0;
         $('#yawValue').textContent = '—°';
+        pintarDerivaGiroscopio(estado);
         $('#yawStatus').textContent = estado;
         $('#yawStatus').classList.remove('online');
         actualizarOrientacionBote(modo === 'simple' ? anguloVisualSimple() : anguloVisualAvanzado());
     }
     function pintarVelocidad(velocidadMps) {
-        velocidadEstimadaMps = clamp(velocidadMps, 0, SPEED_GAUGE_MAX_MPS);
-        const nudos = velocidadEstimadaMps * KNOTS_PER_MPS;
+        velocidadEstimadaMps = clamp(velocidadMps, 0, APP_CONFIG.telemetry.maxSpeedMps);
+        const nudos = velocidadEstimadaMps * TELEMETRY.knotsPerMps;
         $('#speedValue').textContent = `${nudos.toFixed(1)} kt`;
         $('#speedStatus').textContent = 'Estimación MPU';
         $('#speedStatus').classList.add('online');
@@ -333,10 +462,10 @@ import { crearRumboBote, crearVelocimetroNudos, crearHorizonteArcade } from './i
         const paquete = /^T,(-?\d{1,3}),(-?\d{1,2}),(-?\d{1,3}),(\d{1,2})$/.exec(linea);
         if (paquete) {
             const [yaw, pitch, roll, velocidadDecimas] = paquete.slice(1).map(Number);
-            if (Number.isInteger(yaw) && yaw >= -180 && yaw <= 180 &&
-                Number.isInteger(pitch) && pitch >= -90 && pitch <= 90 &&
-                Number.isInteger(roll) && roll >= -180 && roll <= 180 &&
-                Number.isInteger(velocidadDecimas) && velocidadDecimas >= 0 && velocidadDecimas <= 50) {
+            if (Number.isInteger(yaw) && yaw >= TELEMETRY.yawRange[0] && yaw <= TELEMETRY.yawRange[1] &&
+                Number.isInteger(pitch) && pitch >= TELEMETRY.pitchRange[0] && pitch <= TELEMETRY.pitchRange[1] &&
+                Number.isInteger(roll) && roll >= TELEMETRY.rollRange[0] && roll <= TELEMETRY.rollRange[1] &&
+                Number.isInteger(velocidadDecimas) && velocidadDecimas >= TELEMETRY.speedDeciRange[0] && velocidadDecimas <= TELEMETRY.speedDeciRange[1]) {
                 pintarYaw(yaw);
                 pintarActitud(pitch, roll);
                 pintarVelocidad(velocidadDecimas / 10);
@@ -351,10 +480,14 @@ import { crearRumboBote, crearVelocimetroNudos, crearHorizonteArcade } from './i
         bufferYaw += texto;
         const lineas = bufferYaw.split(/[\r\n]+/);
         bufferYaw = lineas.pop() ?? '';
-        for (const linea of lineas)
+        for (const linea of lineas) {
+            if (linea.trim())
+                agregarRegistro('received', linea.trim());
             procesarLineaTelemetria(linea);
+        }
         // Algunas versiones del plugin entregan una sola línea sin terminador.
         if (/^T,-?\d{1,3},-?\d{1,2},-?\d{1,3},\d{1,2}$/.test(bufferYaw.trim())) {
+            agregarRegistro('received', bufferYaw.trim());
             procesarLineaTelemetria(bufferYaw);
             bufferYaw = '';
         }
@@ -370,7 +503,7 @@ import { crearRumboBote, crearVelocimetroNudos, crearHorizonteArcade } from './i
     async function detenerRecepcionYaw(address = direccionActual, desactivarEnArduino = false) {
         recepcionYawSolicitada = false;
         if (desactivarEnArduino && conectado && address) {
-            const ok = await enviarLinea('TEL,0\n', address);
+            const ok = await enviarLinea(COMMAND.telemetryOff, address);
             if (!ok) console.warn('No se pudo desactivar la telemetría en el Arduino.');
         }
         if (BT && address && notificacionesYawActivas) {
@@ -413,7 +546,7 @@ import { crearRumboBote, crearVelocimetroNudos, crearHorizonteArcade } from './i
             }
             console.warn('Notificaciones Bluetooth no disponibles; se usará lectura periódica:', e);
         }
-        const ok = await enviarLinea('TEL,1\n', address);
+        const ok = await enviarLinea(COMMAND.telemetryOn, address);
         if (ok) {
             intentosSolicitudYaw = 1;
             ultimoComandoYawMs = Date.now();
@@ -443,26 +576,26 @@ import { crearRumboBote, crearVelocimetroNudos, crearHorizonteArcade } from './i
         finally {
             leyendoYaw = false;
         }
-    }, YAW_READ_POLL_MS);
+    }, APP_CONFIG.timing.telemetryReadPollMs);
     setInterval(() => {
         if (!recepcionYawSolicitada || !conectado)
             return;
         const ahora = Date.now();
-        if (ultimaTelemetriaYawMs && ahora - ultimaTelemetriaYawMs > TELEMETRY_STALE_MS) {
+        if (ultimaTelemetriaYawMs && ahora - ultimaTelemetriaYawMs > APP_CONFIG.timing.telemetryStaleMs) {
             limpiarYaw('Telemetría interrumpida');
             limpiarVelocidad('Telemetría interrumpida');
             limpiarActitud('Telemetría interrumpida');
             paqueteTelemetriaRecibido = false;
         }
         // Si el firmware estaba armando/calibrando al conectar, reintenta pocos veces.
-        if (!paqueteTelemetriaRecibido && intentosSolicitudYaw < YAW_MAX_REQUEST_RETRIES &&
-            ahora - ultimoComandoYawMs >= 1600) {
+        if (!paqueteTelemetriaRecibido && intentosSolicitudYaw < APP_CONFIG.timing.telemetryMaxRetries &&
+            ahora - ultimoComandoYawMs >= APP_CONFIG.timing.telemetryRetryMs) {
             intentosSolicitudYaw++;
             ultimoComandoYawMs = ahora;
-            void enviarLinea('TEL,1\n').then(ok => { if (!ok) perderConexion(); });
+            void enviarLinea(COMMAND.telemetryOn).then(ok => { if (!ok) perderConexion(); });
         }
-        if (!paqueteTelemetriaRecibido && intentosSolicitudYaw >= YAW_MAX_REQUEST_RETRIES &&
-            ahora - ultimoComandoYawMs >= TELEMETRY_STALE_MS) {
+        if (!paqueteTelemetriaRecibido && intentosSolicitudYaw >= APP_CONFIG.timing.telemetryMaxRetries &&
+            ahora - ultimoComandoYawMs >= APP_CONFIG.timing.telemetryStaleMs) {
             $('#yawStatus').textContent = 'Sin datos del MPU';
             $('#yawStatus').classList.remove('online');
             $('#speedStatus').textContent = 'Sin datos del MPU';
@@ -470,28 +603,32 @@ import { crearRumboBote, crearVelocimetroNudos, crearHorizonteArcade } from './i
             $('#attStatus').textContent = 'Sin datos del MPU';
             $('#attStatus').classList.remove('online');
         }
-    }, 500);
+    }, APP_CONFIG.timing.telemetryRetryCheckMs);
+    setInterval(async () => {
+        if (!conectado || desconectando || enviosPendientes > 0)
+            return;
+        const ok = await enviarConfiguracionFirmware();
+        if (!ok)
+            perderConexion();
+    }, APP_CONFIG.timing.configurationRefreshMs);
     function pintar() {
-        const { direccion, potencia } = valoresAvanzados();
+        const { direccion, potencia } = valoresControl();
         const velocidadSolicitada = Math.round(acel.valor() * 100);
         $('#thrPct').textContent = `${velocidadSolicitada}%`;
         $('#thrPot').textContent = `pot. ${potencia}`;
         $('#strAng').textContent = `${direccion}°`;
+        $('#simplePowerValue').textContent = String(cfg.maxPower);
+        $('#simplePowerHint').textContent = 'potencia configurada';
         // El velocímetro se actualiza con la velocidad estimada incluida en el paquete T del MPU.
         actualizarOrientacionBote(modo === 'simple' ? anguloVisualSimple() : anguloVisualAvanzado());
-        $('#btnPID').classList.toggle('active', pidActivo);
-        $('#btnPID').textContent = `PID: ${pidActivo ? 'ACTIVADO' : 'DESACTIVADO'}`;
-        $('#btnPID').setAttribute('aria-pressed', String(pidActivo));
-        $('#btnPID').disabled = (modo === 'simple');
         $('#btnCrucero').classList.toggle('active', cruceroActivo);
         $('#btnCrucero').textContent = `Crucero: ${cruceroActivo ? 'ACTIVADO' : 'DESACTIVADO'}`;
         $('#btnCrucero').setAttribute('aria-pressed', String(cruceroActivo));
-        $('#btnCrucero').disabled = (modo === 'simple') || !pidActivo;
     }
     function aviso(texto) {
         $('#aviso').textContent = texto;
         clearTimeout(aviso.timer);
-        aviso.timer = setTimeout(() => { $('#aviso').textContent = ''; }, 4000);
+        aviso.timer = setTimeout(() => { $('#aviso').textContent = ''; }, INTERVAL.noticeClearMs);
     }
     function pintarEstado(texto) {
         $('#estado').classList.toggle('on', conectado);
@@ -505,28 +642,26 @@ import { crearRumboBote, crearVelocimetroNudos, crearHorizonteArcade } from './i
     }
     async function pararLocalYEnviar() {
         simpleAceleradorActivo = false;
-        simpleDireccionActiva = '';
+        simpleDireccionActiva = SIMPLE.center;
         acel.poner(0);
         timon.poner(0.5);
         pintar();
         if (conectado) {
-            const okS = await enviarLinea('S\n');
-            if (!okS) {
+            const okMotor = await enviarLinea(COMMAND.power(0));
+            if (!okMotor) {
                 perderConexion();
                 return;
             }
-            if (modo !== 'simple') {
-                const okC = await enviarLinea('C\n');
-                if (!okC) {
+            const okDireccion = await enviarLinea(COMMAND.direction(cfg.angCenter));
+            if (!okDireccion) {
+                perderConexion();
+                return;
+            }
+            if (cruceroActivo) {
+                const okHold = await enviarLinea(COMMAND.hold);
+                if (!okHold) {
                     perderConexion();
                     return;
-                }
-                if (cruceroActivo) {
-                    const okHold = await enviarLinea('HOLD\n');
-                    if (!okHold) {
-                        perderConexion();
-                        return;
-                    }
                 }
             }
             ultimaPotenciaEnviada = 0;
@@ -536,14 +671,15 @@ import { crearRumboBote, crearVelocimetroNudos, crearHorizonteArcade } from './i
     }
     function perderConexion() {
         const address = direccionActual;
+        calibracionPendienteConfirmacion = false;
+        $('#btnCalibrar').textContent = 'Calibrar';
         conectado = false;
         nombre = '';
         direccionActual = '';
-        pidActivo = false;
         cruceroActivo = false;
         pintar();
         simpleAceleradorActivo = false;
-        simpleDireccionActiva = '';
+        simpleDireccionActiva = SIMPLE.center;
         reiniciarSeguimientoAvanzado();
         acel.poner(0);
         timon.poner(0.5);
@@ -557,71 +693,47 @@ import { crearRumboBote, crearVelocimetroNudos, crearHorizonteArcade } from './i
             void BT.disconnect({ address }).catch(() => { });
     }
     /**
-     * Lazo de control periódico. Limita la frecuencia de escrituras y refresca
-     * las órdenes activas antes de que venza el failsafe de 1600 ms del Arduino.
+     * Lazo común Simple/Avanzado. Limita escrituras y renueva solo órdenes activas
+     * de potencia/dirección antes del failsafe del Arduino.
      * El firmware conserva la última barrera de seguridad si la app pierde conexión.
      */
     setInterval(async () => {
         if (!conectado || desconectando || enviosPendientes > 0)
             return;
         const ahora = Date.now();
-        if (modo === 'simple') {
-            // El firmware Simple heredado utiliza un único carácter por estado.
-            // Mientras se gira, L/R tienen prioridad; F no debe recentrar el timón.
-            if (simpleDireccionActiva && ahora - ultimoEnvioDireccionSimple >= REFRESH_ACTIVE_MS) {
-                const cmd = simpleDireccionActiva === 'L' ? 'G' : 'H'; // Compatibilidad con el firmware Simple clásico
-                const ok = await enviarLinea(`${cmd}\n`);
-                if (!ok) {
-                    perderConexion();
-                    return;
-                }
-                // simpleDireccionActiva conserva L/R; cmd puede ser su alias G/H.
-                if (simpleDireccionActiva)
-                    ultimoEnvioDireccionSimple = Date.now();
-            } else if (!simpleDireccionActiva && simpleAceleradorActivo &&
-                ahora - ultimoEnvioAceleradorSimple >= REFRESH_ACTIVE_MS) {
-                const ok = await enviarLinea('F\n');
-                if (!ok) {
-                    perderConexion();
-                    return;
-                }
-                ultimoEnvioAceleradorSimple = Date.now();
-            }
-            return;
-        }
-        const actual = valoresAvanzados();
+        const actual = valoresControl();
         const cambioD = actual.direccion !== ultimaDireccionEnviada;
         const cambioP = actual.potencia !== ultimaPotenciaEnviada;
-        if (ahora - ultimoEnvio < SEND_MIN_MS)
+        if (ahora - ultimoEnvio < APP_CONFIG.timing.commandMinMs)
             return;
         let linea = '';
         let tipo = '';
         if (cambioD && cambioP) {
             if (prioridadDireccion) {
-                linea = `D${actual.direccion}\n`;
+                linea = COMMAND.direction(actual.direccion);
                 tipo = 'D';
             }
             else {
-                linea = `P${actual.potencia}\n`;
+                linea = COMMAND.power(actual.potencia);
                 tipo = 'P';
             }
             prioridadDireccion = !prioridadDireccion;
         }
         else if (cambioD) {
-            linea = `D${actual.direccion}\n`;
+            linea = COMMAND.direction(actual.direccion);
             tipo = 'D';
         }
         else if (cambioP) {
-            linea = `P${actual.potencia}\n`;
+            linea = COMMAND.power(actual.potencia);
             tipo = 'P';
         }
-        else if (ahora - ultimoEnvio >= REFRESH_ACTIVE_MS) {
+        else if (ahora - ultimoEnvio >= APP_CONFIG.timing.activeRefreshMs) {
             if (actual.potencia > 0) {
-                linea = `P${actual.potencia}\n`;
+                linea = COMMAND.power(actual.potencia);
                 tipo = 'P';
             }
             else if (actual.direccion !== cfg.angCenter) {
-                linea = `D${actual.direccion}\n`;
+                linea = COMMAND.direction(actual.direccion);
                 tipo = 'D';
             }
         }
@@ -637,28 +749,16 @@ import { crearRumboBote, crearVelocimetroNudos, crearHorizonteArcade } from './i
             ultimaDireccionEnviada = actual.direccion;
         if (tipo === 'P')
             ultimaPotenciaEnviada = actual.potencia;
-    }, POLL_MS);
+    }, APP_CONFIG.timing.controlPollMs);
     /* ---------- Cambiar de modo ---------- */
     async function cambiarModo() {
         const siguienteModo = modo === 'avanzado' ? 'simple' : 'avanzado';
-        if (siguienteModo === 'simple' && conectado && (cruceroActivo || pidActivo)) {
-            // El protocolo anterior no entiende PID/CRU; apagarlos al entrar en Simple.
-            await enviarLinea('CRU,0\n');
-            await enviarLinea('PID,0\n');
-            pidActivo = false;
-            cruceroActivo = false;
-            pintar();
-        }
         await pararLocalYEnviar();
         modo = siguienteModo;
         $('main').classList.toggle('modo-simple', modo === 'simple');
-        if (modo === 'avanzado' && conectado) {
-            // C es ignorado por el firmware antiguo, pero centra el timón en el firmware nuevo.
-            await enviarLinea('C\n');
-        }
         $('#btnModo').textContent = modo === 'simple' ? 'Cambiar a Avanzado' : 'Cambiar a Simple';
         $('#controlHint').innerHTML = modo === 'simple'
-            ? 'Modo Simple<br><small>F/S/L/G/R/H; girar también activa el motor</small>'
+            ? 'Modo Simple<br><small>Usa la potencia y los ángulos configurados</small>'
             : 'Modo Avanzado<br><small>Desliza para ajustar potencia y dirección</small>';
         reiniciarSeguimientoAvanzado();
         pintar();
@@ -669,69 +769,43 @@ import { crearRumboBote, crearVelocimetroNudos, crearHorizonteArcade } from './i
         }
     }
     $('#btnModo').addEventListener('click', () => { void cambiarModo(); });
-    // Control de rumbo: solo comandos app -> Arduino; nunca se espera telemetría.
-    $('#btnPID').addEventListener('click', async () => {
-        if (modo === 'simple') {
-            aviso('PID solo está disponible en el modo Avanzado.');
-            return;
-        }
-        if (!conectado) {
-            aviso('Conecta el HC-06 antes de cambiar el PID.');
-            return;
-        }
-        pidActivo = !pidActivo;
-        if (!pidActivo)
-            cruceroActivo = false;
-        pintar();
-        const ok = await enviarLinea(`PID,${pidActivo ? 1 : 0}\n`);
-        if (!ok) {
-            perderConexion();
-            return;
-        }
-        if (pidActivo) {
-            await enviarLinea(`KP,${cfg.pidP}\n`);
-            await enviarLinea(`KI,${cfg.pidI}\n`);
-            await enviarLinea(`KD,${cfg.pidD}\n`);
-            aviso('PID activado. El rumbo es relativo y puede derivar.');
-        }
-        else {
-            await enviarLinea('CRU,0\n');
-            aviso('PID desactivado; dirección manual.');
-        }
-    });
+    // Crucero incluye PID y ganancias en una sola orden comprobada.
     $('#btnCrucero').addEventListener('click', async () => {
-        if (modo === 'simple') {
-            aviso('Crucero solo está disponible en el modo Avanzado.');
-            return;
-        }
         if (!conectado) {
             aviso('Conecta el HC-06 primero.');
             return;
         }
-        if (!pidActivo) {
-            aviso('Activa el PID antes del modo crucero.');
-            return;
-        }
         cruceroActivo = !cruceroActivo;
         pintar();
-        const ok = await enviarLinea(`CRU,${cruceroActivo ? 1 : 0}\n`);
+        const ok = await enviarLinea(cruceroActivo ? COMMAND.cruiseOn(cfg) : COMMAND.cruiseOff);
         if (!ok) {
             perderConexion();
             return;
         }
-        aviso(cruceroActivo ? 'Crucero activado: mantendrá el rumbo integrado actual.' : 'Crucero desactivado.');
+        aviso(cruceroActivo
+            ? 'Crucero activado con las ganancias configuradas; el rumbo puede derivar.'
+            : 'Crucero desactivado.');
     });
     $('#btnCalibrar').addEventListener('click', async () => {
+        clearTimeout(aviso.timer);
+        $('#aviso').textContent = '';
         if (!conectado) {
-            aviso('Conecta el HC-06 antes de calibrar.');
+            calibracionPendienteConfirmacion = false;
+            $('#btnCalibrar').textContent = 'Calibrar';
             return;
         }
-        const ok = await enviarLinea('CAL\n');
+        if (!calibracionPendienteConfirmacion) {
+            calibracionPendienteConfirmacion = true;
+            $('#btnCalibrar').textContent = 'Calibrar: ¿confirmar?';
+            return;
+        }
+        calibracionPendienteConfirmacion = false;
+        $('#btnCalibrar').textContent = 'Calibrar';
+        const ok = await enviarLinea(COMMAND.calibration);
         if (!ok) {
             perderConexion();
             return;
         }
-        aviso('Calibración solicitada. Mantén el barco completamente inmóvil unos segundos.');
     });
     /* ---------- Controles del modo Simple: velocidad y dirección independientes ---------- */
     function validarModoSimpleConectado() {
@@ -744,16 +818,42 @@ import { crearRumboBote, crearVelocimetroNudos, crearHorizonteArcade } from './i
         return true;
     }
     let simpleStopLatch = false;
-    function detenerSimplePorOrden() {
+    async function enviarEstadoSimple() {
+        if (!conectado || modo !== 'simple')
+            return;
+        const actual = valoresSimples();
+        if (actual.direccion !== ultimaDireccionEnviada) {
+            const ok = await enviarLinea(COMMAND.direction(actual.direccion));
+            if (!ok) { perderConexion(); return; }
+            ultimaDireccionEnviada = actual.direccion;
+        }
+        if (actual.potencia !== ultimaPotenciaEnviada) {
+            const ok = await enviarLinea(COMMAND.power(actual.potencia));
+            if (!ok) { perderConexion(); return; }
+            ultimaPotenciaEnviada = actual.potencia;
+        }
+        ultimoEnvio = Date.now();
+    }
+    async function detenerSimplePorOrden() {
         simpleStopLatch = true;
         simpleAceleradorActivo = false;
-        simpleDireccionActiva = '';
+        simpleDireccionActiva = SIMPLE.center;
         pintar();
-        if (conectado) {
-            void enviarLinea('S\n').then(ok => { if (!ok) perderConexion(); });
+        if (!conectado)
+            return;
+        const okMotor = await enviarLinea(COMMAND.power(0));
+        if (!okMotor) { perderConexion(); return; }
+        const okDireccion = await enviarLinea(COMMAND.direction(cfg.angCenter));
+        if (!okDireccion) { perderConexion(); return; }
+        if (cruceroActivo) {
+            const okHold = await enviarLinea(COMMAND.hold);
+            if (!okHold) { perderConexion(); return; }
         }
+        ultimaPotenciaEnviada = 0;
+        ultimaDireccionEnviada = cfg.angCenter;
+        ultimoEnvio = Date.now();
     }
-    $('#simpleDecelerate').addEventListener('click', detenerSimplePorOrden);
+    $('#simpleDecelerate').addEventListener('click', () => { void detenerSimplePorOrden(); });
 
     function vincularAceleradorSimple(el) {
         let pointerId = null;
@@ -765,44 +865,27 @@ import { crearRumboBote, crearVelocimetroNudos, crearHorizonteArcade } from './i
             e.preventDefault();
             simpleStopLatch = false;
             pointerId = e.pointerId;
-            try {
-                el.setPointerCapture(e.pointerId);
-            }
-            catch { }
+            try { el.setPointerCapture(e.pointerId); } catch { }
             simpleAceleradorActivo = true;
-            ultimoEnvioAceleradorSimple = Date.now();
-            void (async () => {
-                const ok = await enviarLinea('F\n');
-                if (!ok) {
-                    perderConexion();
-                    return;
-                }
-                if (simpleAceleradorActivo)
-                    ultimoEnvioAceleradorSimple = Date.now();
-            })();
+            pintar();
+            void enviarEstadoSimple();
         };
-        const soltar = async (e) => {
+        const soltar = async e => {
             if (pointerId === null || (e && e.pointerId !== pointerId))
                 return;
             pointerId = null;
             if (simpleStopLatch) return;
             simpleAceleradorActivo = false;
-            if (!conectado || simpleDireccionActiva)
-                return; // El giro sigue activo y mantiene el motor a potencia fija.
-            const ok = await enviarLinea('S\n');
-            if (!ok) {
-                perderConexion();
-                return;
-            }
-            ultimoEnvio = Date.now();
-            ultimaPotenciaEnviada = 0;
+            pintar();
+            if (!simpleDireccionActiva)
+                await enviarEstadoSimple();
         };
         el.addEventListener('pointerdown', comenzar);
         el.addEventListener('pointerup', e => { void soltar(e); });
         el.addEventListener('pointercancel', e => { void soltar(e); });
         el.addEventListener('lostpointercapture', e => { void soltar(e); });
     }
-    function vincularDireccionSimple(el, comando) {
+    function vincularDireccionSimple(el, direccion) {
         let pointerId = null;
         const comenzar = e => {
             if (pointerId !== null || (e.pointerType === 'mouse' && e.button !== 0))
@@ -812,43 +895,26 @@ import { crearRumboBote, crearVelocimetroNudos, crearHorizonteArcade } from './i
             e.preventDefault();
             simpleStopLatch = false;
             pointerId = e.pointerId;
-            try {
-                el.setPointerCapture(e.pointerId);
-            }
-            catch { }
-            simpleDireccionActiva = comando;
-            ultimoEnvioDireccionSimple = Date.now();
+            try { el.setPointerCapture(e.pointerId); } catch { }
+            simpleDireccionActiva = direccion;
             pintar();
-            void (async () => {
-                const ok = await enviarLinea(`${comando}\n`);
-                if (!ok) {
-                    perderConexion();
-                    return;
-                }
-                if (simpleDireccionActiva === comando)
-                    ultimoEnvioDireccionSimple = Date.now();
-            })();
+            void enviarEstadoSimple();
         };
-        const soltar = async (e) => {
+        const soltar = async e => {
             if (pointerId === null || (e && e.pointerId !== pointerId))
                 return;
             pointerId = null;
-            // Si otra dirección ya fue seleccionada, no la sobrescribas al soltar este dedo.
-            if (simpleStopLatch || simpleDireccionActiva !== comando)
+            if (simpleStopLatch || simpleDireccionActiva !== direccion)
                 return;
-            simpleDireccionActiva = '';
+            simpleDireccionActiva = SIMPLE.center;
             pintar();
             if (!conectado)
                 return;
-            // El firmware heredado no tiene C ni HOLD: F recentra si el acelerador sigue
-            // pulsado; de lo contrario S apaga el motor y deja el servo donde está.
-            const siguiente = simpleAceleradorActivo ? 'F' : 'S';
-            const ok = await enviarLinea(`${siguiente}\n`);
-            if (!ok) {
-                perderConexion();
-                return;
+            await enviarEstadoSimple();
+            if (cruceroActivo && conectado) {
+                const okHold = await enviarLinea(COMMAND.hold);
+                if (!okHold) { perderConexion(); return; }
             }
-            if (siguiente === 'F') ultimoEnvioAceleradorSimple = Date.now();
         };
         el.addEventListener('pointerdown', comenzar);
         el.addEventListener('pointerup', e => { void soltar(e); });
@@ -856,19 +922,18 @@ import { crearRumboBote, crearVelocimetroNudos, crearHorizonteArcade } from './i
         el.addEventListener('lostpointercapture', e => { void soltar(e); });
     }
     vincularAceleradorSimple($('#simpleForward'));
-    vincularDireccionSimple($('#simpleLeft'), 'L'); // Se traduce a G en el protocolo heredado
-    vincularDireccionSimple($('#simpleRight'), 'R'); // Se traduce a H en el protocolo heredado
-    // #simpleDecelerate es intencionalmente decorativo: no tiene listener ni envía órdenes.
+    vincularDireccionSimple($('#simpleLeft'), SIMPLE.port);
+    vincularDireccionSimple($('#simpleRight'), SIMPLE.starboard);
     /** ---------- Emparejamiento y conexión Bluetooth serie ---------- */
     async function abrirDispositivos() {
         if (conectado) {
             desconectando = true;
             const address = direccionActual;
             try {
-                if (cruceroActivo && modo !== 'simple')
-                    await enviarLinea('CRU,0\n', address);
-                await enviarLinea('S\n', address);
-                if (modo !== 'simple') await enviarLinea('C\n', address);
+                if (cruceroActivo)
+                    await enviarLinea(COMMAND.cruiseOff, address);
+                await enviarLinea(COMMAND.power(0), address);
+                await enviarLinea(COMMAND.direction(cfg.angCenter), address);
                 await detenerRecepcionYaw(address, true);
                 if (BT && address)
                     await BT.disconnect({ address });
@@ -877,12 +942,13 @@ import { crearRumboBote, crearVelocimetroNudos, crearHorizonteArcade } from './i
                 console.warn('Error durante la desconexión:', e);
             }
             finally {
+                calibracionPendienteConfirmacion = false;
+                $('#btnCalibrar').textContent = 'Calibrar';
                 conectado = false;
                 nombre = '';
                 direccionActual = '';
                 simpleAceleradorActivo = false;
-                simpleDireccionActiva = '';
-                pidActivo = false;
+                simpleDireccionActiva = SIMPLE.center;
                 cruceroActivo = false;
                 desconectando = false;
                 reiniciarSeguimientoAvanzado();
@@ -974,32 +1040,32 @@ import { crearRumboBote, crearVelocimetroNudos, crearHorizonteArcade } from './i
             reiniciarSeguimientoAvanzado();
             ultimoEnvio = 0;
             simpleAceleradorActivo = false;
-            simpleDireccionActiva = '';
-            ultimoEnvioAceleradorSimple = Date.now();
-            ultimoEnvioDireccionSimple = Date.now();
+            simpleDireccionActiva = SIMPLE.center;
             pintarEstado();
-            const ok = await enviarLinea('S\n');
+            const ok = await enviarLinea(COMMAND.power(0));
             if (!ok) {
+                perderConexion();
+                return;
+            }
+            const okDireccion = await enviarLinea(COMMAND.direction(cfg.angCenter));
+            if (!okDireccion) {
                 perderConexion();
                 return;
             }
             ultimaPotenciaEnviada = 0;
             ultimaDireccionEnviada = cfg.angCenter;
             ultimoEnvio = Date.now();
-            pidActivo = false;
             cruceroActivo = false;
             pintar();
-            if (modo !== 'simple') {
-                const okCentro = await enviarLinea('C\n');
-                if (!okCentro) {
-                    perderConexion();
-                    return;
-                }
-                await enviarLinea('PID,0\n');
-                await enviarLinea('CRU,0\n');
-                await enviarLinea(`KP,${cfg.pidP}\n`);
-                await enviarLinea(`KI,${cfg.pidI}\n`);
-                await enviarLinea(`KD,${cfg.pidD}\n`);
+            const okCrucero = await enviarLinea(COMMAND.cruiseOff);
+            if (!okCrucero) {
+                perderConexion();
+                return;
+            }
+            const okConfig = await enviarConfiguracionFirmware(direccionActual);
+            if (!okConfig) {
+                perderConexion();
+                return;
             }
             await iniciarRecepcionYaw(direccionActual);
             if (!conectado)
@@ -1017,11 +1083,21 @@ import { crearRumboBote, crearVelocimetroNudos, crearHorizonteArcade } from './i
     }
     /** ---------- Eventos de interfaz y persistencia de ajustes ---------- */
     $('#btnConectar').addEventListener('click', () => void abrirDispositivos());
+    $('#btnRegistros').addEventListener('click', () => {
+        abrirDialogo('#panelRegistros');
+        requestAnimationFrame(() => document.querySelectorAll('.registro-lista').forEach(caja => {
+            caja.scrollTop = caja.scrollHeight;
+        }));
+    });
+    $('#btnCerrarRegistros').addEventListener('click', () => $('#panelRegistros').close());
     $('#btnCerrarDisp').addEventListener('click', () => $('#dispositivos').close());
     $('#btnActualizarDisp').addEventListener('click', () => void cargarDispositivos());
     $('#btnParar').addEventListener('click', () => { void pararLocalYEnviar(); aviso('Motor detenido y dirección centrada.'); });
     for (const [k, [lo, hi]] of Object.entries(LIMITES)) {
         const input = $('#' + k);
+        input.min = lo;
+        input.max = hi;
+        input.step = '1';
         input.value = cfg[k];
         input.addEventListener('change', () => {
             const n = Number(input.value);
@@ -1036,20 +1112,24 @@ import { crearRumboBote, crearVelocimetroNudos, crearHorizonteArcade } from './i
     }
     for (const key of ['pidP', 'pidI', 'pidD']) {
         const input = $('#' + key);
+        input.min = APP_CONFIG.pidLimits[key][0];
+        input.max = APP_CONFIG.pidLimits[key][1];
+        input.step = APP_CONFIG.pidSteps[key];
         input.value = cfg[key];
         input.addEventListener('change', async () => {
             const n = Number(input.value);
-            const limits = { pidP: [0, 50], pidI: [0, 10], pidD: [0, 50] }[key];
+            const limits = APP_CONFIG.pidLimits[key];
             if (!Number.isFinite(n) || input.value === '') {
                 input.value = cfg[key];
                 return;
             }
-            cfg[key] = Math.min(limits[1], Math.max(limits[0], n));
+            const decimals = String(APP_CONFIG.pidSteps[key]).split('.')[1]?.length || 0;
+            const ajustado = clamp(n, limits[0], limits[1]);
+            cfg[key] = Number(ajustado.toFixed(decimals));
             input.value = cfg[key];
             guardar();
-            if (conectado) {
-                const command = { pidP: 'KP', pidI: 'KI', pidD: 'KD' }[key];
-                const ok = await enviarLinea(`${command},${cfg[key]}\n`);
+            if (conectado && cruceroActivo) {
+                const ok = await enviarLinea(COMMAND.cruiseOn(cfg));
                 if (!ok)
                     perderConexion();
             }
@@ -1060,7 +1140,7 @@ import { crearRumboBote, crearVelocimetroNudos, crearHorizonteArcade } from './i
     document.querySelectorAll('[data-probar]').forEach(b => b.addEventListener('click', async () => {
         const posicion = Number(b.dataset.probar);
         if (cruceroActivo && conectado) {
-            const ok = await enviarLinea('CRU,0\n');
+            const ok = await enviarLinea(COMMAND.cruiseOff);
             if (!ok) {
                 perderConexion();
                 return;
@@ -1087,9 +1167,10 @@ import { crearRumboBote, crearVelocimetroNudos, crearHorizonteArcade } from './i
             $('#' + key).value = cfg[key];
         $('#throttleSpring').checked = cfg.throttleSpring;
         if (conectado) {
-            void enviarLinea(`KP,${cfg.pidP}\n`);
-            void enviarLinea(`KI,${cfg.pidI}\n`);
-            void enviarLinea(`KD,${cfg.pidD}\n`);
+            void enviarConfiguracionFirmware().then(ok => { if (!ok) perderConexion(); });
+            if (cruceroActivo)
+                void enviarLinea(COMMAND.cruiseOn(cfg))
+                    .then(ok => { if (!ok) perderConexion(); });
         }
         pintar();
         reiniciarSeguimientoAvanzado();

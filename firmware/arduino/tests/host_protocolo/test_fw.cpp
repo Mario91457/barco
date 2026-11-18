@@ -45,10 +45,13 @@ int main(){
   feed("C"); step(60); CHECK(direccionAplicada==95);                        // 'C' suelto: centro calibrado
   feed("L"); step(3); CHECK(direccionAplicada==130 && potenciaActual==DEFAULT_SPEED);
   feed("R"); step(3); CHECK(direccionAplicada==70);
-  feed("F"); step(3); CHECK(direccionAplicada==95);
-  feed("S"); step(3); CHECK(potenciaActual==0);
+  uint32_t ultimaOrdenAntesF=ultimaOrdenValidaMs;
+  feed("F"); step(3); CHECK(direccionAplicada==95 && potenciaActual==DEFAULT_SPEED);
+  CHECK(!controlActivo && ultimaOrdenValidaMs==ultimaOrdenAntesF);            // F puntual no renueva ni arma el failsafe
+  step(FAILSAFE_MS+50); CHECK(potenciaActual==DEFAULT_SPEED && !controlActivo); // el silencio no para el comando clásico
+  feed("S"); step(3); CHECK(potenciaActual==0 && !controlActivo);           // S siempre detiene explícitamente
   feed("H"); step(60); CHECK(direccionAplicada==70);                        // H suelto con timeout 40 ms
-  feed("S"); step(3);
+  feed("S"); step(3); CHECK(potenciaActual==0);
 
   printf("[failsafe] centra con la calibración\n");
   tx(FR_P20); tx(FR_D120);
@@ -59,8 +62,22 @@ int main(){
   tx(FR_P20); step(1000); tx(FR_ANG); tx(FR_PMAX50); step(700);
   CHECK(potenciaActual==0);                                                  // 1,7 s desde P20 aunque llegaron ANG/PMAX
 
-  printf("[PID] sentido de corrección según la calibración\n");
-  tx(FR_PID1); tx(FR_CRU1); CHECK(pidActivo && cruceroActivo);
+  printf("[crucero] checksum, validación atómica y captura única de rumbo\n");
+  tx(FR_CRU1); CHECK(cruceroActivo && pidP==2.0f && pidI==0.0f && pidD==0.4f);
+  float rumboCapturado=rumboObjetivo;
+  yawRelativo += 30.0f;
+  tx(FR_CRU_UPDATE);
+  CHECK(cruceroActivo && pidP==5.0f && pidI==0.1f && pidD==2.5f);
+  CHECK(rumboObjetivo==rumboCapturado);                                       // actualizar ganancias no recaptura rumbo
+  tx(FR_CRU_RANGE_BAD); CHECK(pidP==5.0f && cruceroActivo);
+  tx(FR_CRU_FORMAT_BAD); CHECK(pidP==5.0f && cruceroActivo);
+  tx(FR_CRU_BAD_CHECKSUM); CHECK(pidP==5.0f && cruceroActivo);
+  tx(FR_CRU_OLD); CHECK(pidP==5.0f && cruceroActivo);                         // CRU,1 antiguo se ignora
+  tx(FR_PID_OLD); CHECK(cruceroActivo);                                       // PID antiguo se ignora
+  tx(FR_CRU_OFF); CHECK(!cruceroActivo);
+
+  printf("[PID de crucero] sentido de corrección según la calibración\n");
+  yawRelativo=0.0f; rumboObjetivo=0.0f; tx(FR_CRU1); CHECK(cruceroActivo);
   // yaw positivo (giro a estribor) => el timón debe ir a babor (130 con ANG 95/130/70)
   g_gyroZ = (int)(30*GYRO_LSB_PER_DPS);     // +30 °/s
   step(300);
@@ -68,7 +85,7 @@ int main(){
   CHECK(yawRelativo>5.0f); CHECK(direccionAplicada>95 && direccionAplicada<=130);
   g_gyroZ=0;
   // calibración invertida: estribor 120 > centro 90 => el sentido se invierte solo
-  tx(FR_ANG_REV); tx(FR_CRU1);                                               // CRU,1 recaptura rumbo
+  tx(FR_ANG_REV); tx(FR_CRU_OFF); yawRelativo=0.0f; tx(FR_CRU1);             // nueva activación captura el rumbo actual
   yawRelativo=0; rumboObjetivo=0; g_gyroZ=(int)(30*GYRO_LSB_PER_DPS); step(300);
   printf("   yaw=%.1f servo=%d (centro=90, babor=60, estribor=120)\n",yawRelativo,direccionAplicada);
   CHECK(direccionAplicada<90 && direccionAplicada>=60);                      // hacia babor=60
@@ -91,6 +108,8 @@ int main(){
   printf("[telemetría] yaw con signo configurado\n");
   tx(FR_TEL1); step(400);
   CHECK(BT.out.find("T,")!=std::string::npos);
+  tx(FR_P20); tx(FR_TEL1); step(FAILSAFE_MS+50);
+  CHECK(potenciaActual==0);                                                  // TEL y sus paquetes no renuevan el failsafe
 
   printf("\n%d comprobaciones, %d fallos\n",checks,fails);
   return fails?1:0;

@@ -19,10 +19,9 @@
  *   Órdenes de línea:
  *     P0..P180          : potencia del motor (limitada por PMAX)
  *     D0..D180          : posición del servo en modo Avanzado
- *     PID,0 / PID,1     : desactivar/activar PID
- *     CRU,0 / CRU,1     : desactivar/activar mantenimiento del rumbo relativo
+ *     CRU,0              : desactivar PID y mantenimiento del rumbo
+ *     CRU,1,KP=n,KI=n,KD=n: aplicar ganancias, capturar rumbo y activar crucero
  *     HOLD              : al soltar el timón en crucero, capturar el yaw actual
- *     KP,n / KI,n / KD,n: ajustar ganancias del PID
  *     CAL               : detener el motor y recalibrar el bias del gyro Z
  *     TEL,0 / TEL,1     : desactivar/activar telemetría combinada
  *     ANG,c,b,e         : calibración del servo de la app (centro, babor, estribor;
@@ -98,7 +97,7 @@
 #define USE_WIRE_TIMEOUT 1               // Wire.setWireTimeout: requiere núcleo AVR >= 1.8.3 (poner 0 si no compila)
 #define WIRE_TIMEOUT_US 25000UL
 #define REQUIRE_LINE_CHECKSUM 1          // 1: las líneas sin "*HH" válido se descartan
-#define COMMAND_BUFFER_SIZE 32
+#define COMMAND_BUFFER_SIZE 48
 #define SIMPLE_PREFIX_TIMEOUT_MS 40UL
 #define DEBUG_REPORT_INTERVAL_MS 250UL
 #define TELEMETRY_REPORT_INTERVAL_MS 250UL  // Paquete combinado: máximo 4 informes/s
@@ -248,7 +247,6 @@ uint32_t ultimoReporteYawMs = 0;
 
 bool controlActivo = false;
 bool mpuDisponible = false;
-bool pidActivo = false;
 bool cruceroActivo = false;
 bool cruceroManualActivo = false;  // true mientras el usuario mueve el timón con crucero encendido
 bool telemetriaCombinadaActiva = false;
@@ -695,10 +693,61 @@ void aplicarCalibracionServo(int centro, int babor, int estribor) {
   if (direccionManual == centroAnterior) {
     direccionManual = centro;
   }
-  // Si el PID gobierna el timón, él lo reposiciona en su próximo ciclo.
+  // Si el crucero gobierna el timón, lo reposiciona en su próximo ciclo.
   if (!(cruceroActivo && !cruceroManualActivo)) {
     aplicarServo(direccionManual);
   }
+}
+
+/** Valida CRU completa antes de cambiar ganancias o estado del controlador. */
+bool manejarOrdenCrucero(char *comando) {
+  if (strcmp(comando, "CRU,0") == 0) {
+    cruceroActivo = false;
+    cruceroManualActivo = false;
+    integralError = 0.0f;
+    errorAnterior = 0.0f;
+    aplicarServo(direccionManual);
+    registrarOrdenValida();
+    return true;
+  }
+
+  // CRU,1 antiguo o una orden parcial no cambia el estado.
+  if (strncmp(comando, "CRU,1,", 6) != 0) return false;
+
+  char *campoP = comando + 6;
+  char *coma1 = strchr(campoP, ',');
+  if (coma1 == NULL) return false;
+  *coma1 = '\0';
+  char *campoI = coma1 + 1;
+  char *coma2 = strchr(campoI, ',');
+  if (coma2 == NULL) return false;
+  *coma2 = '\0';
+  char *campoD = coma2 + 1;
+
+  float nuevoP, nuevoI, nuevoD;
+  if (strncmp(campoP, "KP=", 3) != 0 ||
+      strncmp(campoI, "KI=", 3) != 0 ||
+      strncmp(campoD, "KD=", 3) != 0 ||
+      !parsearFloatEstricto(campoP + 3, 0.0f, 50.0f, nuevoP) ||
+      !parsearFloatEstricto(campoI + 3, 0.0f, 10.0f, nuevoI) ||
+      !parsearFloatEstricto(campoD + 3, 0.0f, 50.0f, nuevoD) ||
+      !mpuDisponible) {
+    return false;
+  }
+
+  const bool yaEstabaActivo = cruceroActivo;
+  pidP = nuevoP;
+  pidI = nuevoI;
+  pidD = nuevoD;
+  if (!yaEstabaActivo) {
+    rumboObjetivo = yawRelativo;
+    cruceroManualActivo = false;
+  }
+  cruceroActivo = true;
+  integralError = 0.0f;
+  errorAnterior = 0.0f;
+  registrarOrdenValida();
+  return true;
 }
 
 void manejarComando(char *comando) {
@@ -707,7 +756,6 @@ void manejarComando(char *comando) {
   }
 
   int valorEntero = 0;
-  float valorFloat = 0.0f;
 
   // P<n> controla exclusivamente el motor.
   if (comando[0] == 'P' && comando[1] >= '0' && comando[1] <= '9') {
@@ -732,51 +780,51 @@ void manejarComando(char *comando) {
 
   if (strcmp(comando, "F") == 0) {
     // Semántica del firmware Simple anterior: F centra el timón y aplica potencia fija.
+    controlActivo = false;  // orden puntual clásica: no arma ni renueva el failsafe avanzado
     direccionManual = servoCentro;
     if (cruceroActivo) cruceroManualActivo = true;
     aplicarServo(servoCentro);
     aplicarMotor(DEFAULT_SPEED);
-    registrarOrdenValida();
     return;
   }
 
   if (strcmp(comando, "S") == 0) {
+    controlActivo = false;
     detenerMotorSeguro();
-    registrarOrdenValida();
     return;
   }
 
   if (strcmp(comando, "L") == 0 || strcmp(comando, "G") == 0) {
     // En el protocolo Simple antiguo, L/R también activaban el motor a potencia fija.
+    controlActivo = false;
     direccionManual = servoBabor;
     if (cruceroActivo) cruceroManualActivo = true;
     aplicarServo(direccionManual);
     aplicarMotor(DEFAULT_SPEED);
-    registrarOrdenValida();
     return;
   }
 
   if (strcmp(comando, "C") == 0) {
+    controlActivo = false;
     direccionManual = servoCentro;
     if (cruceroActivo) cruceroManualActivo = true;
     aplicarServo(direccionManual);
-    registrarOrdenValida();
     return;
   }
 
   if (strcmp(comando, "R") == 0 || strcmp(comando, "H") == 0) {
+    controlActivo = false;
     direccionManual = servoEstribor;
     if (cruceroActivo) cruceroManualActivo = true;
     aplicarServo(direccionManual);
     aplicarMotor(DEFAULT_SPEED);
-    registrarOrdenValida();
     return;
   }
 
   // La app manda HOLD una sola vez al soltar el timón en modo crucero.
   // Se captura el yaw ya alcanzado y el PID vuelve a mantener esa nueva dirección.
   if (strcmp(comando, "HOLD") == 0) {
-    if (pidActivo && cruceroActivo && mpuDisponible) {
+    if (cruceroActivo && mpuDisponible) {
       rumboObjetivo = yawRelativo;
       cruceroManualActivo = false;
       integralError = 0.0f;
@@ -838,62 +886,8 @@ void manejarComando(char *comando) {
     return;
   }
 
-  if (strncmp(comando, "PID,", 4) == 0) {
-    if (!parsearEnteroEstricto(comando + 4, 0, 1, valorEntero)) {
-      return;
-    }
-
-    pidActivo = (valorEntero == 1) && mpuDisponible;
-    if (!pidActivo) {
-      cruceroActivo = false;
-      cruceroManualActivo = false;
-      aplicarServo(direccionManual);
-    }
-    integralError = 0.0f;
-    errorAnterior = 0.0f;
-    registrarOrdenValida();
-    return;
-  }
-
   if (strncmp(comando, "CRU,", 4) == 0) {
-    if (!parsearEnteroEstricto(comando + 4, 0, 1, valorEntero)) {
-      return;
-    }
-
-    cruceroActivo = (valorEntero == 1) && pidActivo && mpuDisponible;
-    cruceroManualActivo = false;
-    if (cruceroActivo) {
-      rumboObjetivo = yawRelativo;
-      integralError = 0.0f;
-      errorAnterior = 0.0f;
-    } else {
-      aplicarServo(direccionManual);
-    }
-    registrarOrdenValida();
-    return;
-  }
-
-  if (strncmp(comando, "KP,", 3) == 0) {
-    if (parsearFloatEstricto(comando + 3, 0.0f, 50.0f, valorFloat)) {
-      pidP = valorFloat;
-      registrarOrdenValida();
-    }
-    return;
-  }
-
-  if (strncmp(comando, "KI,", 3) == 0) {
-    if (parsearFloatEstricto(comando + 3, 0.0f, 10.0f, valorFloat)) {
-      pidI = valorFloat;
-      registrarOrdenValida();
-    }
-    return;
-  }
-
-  if (strncmp(comando, "KD,", 3) == 0) {
-    if (parsearFloatEstricto(comando + 3, 0.0f, 50.0f, valorFloat)) {
-      pidD = valorFloat;
-      registrarOrdenValida();
-    }
+    manejarOrdenCrucero(comando);
     return;
   }
 
@@ -1044,7 +1038,7 @@ void actualizarYawYControl() {
   const float tasaGradosSegundo = ((float)gyroZRaw - gyroZBias) / GYRO_LSB_PER_DPS;
   yawRelativo += MPU_YAW_SIGN * tasaGradosSegundo * dt;
 
-  if (!pidActivo || !cruceroActivo || cruceroManualActivo) {
+  if (!cruceroActivo || cruceroManualActivo) {
     return;
   }
 
@@ -1238,8 +1232,6 @@ void reportarYawUSB() {
 
   Serial.print(F("YAW_RELATIVO_DEG="));
   Serial.print(yawParaMonitor(yawRelativo), 2);
-  Serial.print(F(",PID="));
-  Serial.print(pidActivo ? F("ON") : F("OFF"));
   Serial.print(F(",CRUCERO="));
   Serial.println(cruceroActivo ? F("ON") : F("OFF"));
 }

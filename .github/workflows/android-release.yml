@@ -1,0 +1,85 @@
+name: Crear APK para Android
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  android-release:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Descargar el código
+        uses: actions/checkout@v7
+
+      - name: Preparar Java
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+
+      - name: Preparar Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Instalar dependencias y compilar la app web
+        working-directory: app
+        run: |
+          npm ci
+          npm run build
+          npx cap sync android
+          node ../scripts/patch-bluetooth-gradle.mjs
+
+      - name: Preparar firma segura
+        env:
+          BARCO_KEYSTORE_BASE64: ${{ secrets.BARCO_KEYSTORE_BASE64 }}
+          BARCO_KEYSTORE_PASSWORD: ${{ secrets.BARCO_KEYSTORE_PASSWORD }}
+          BARCO_KEY_ALIAS: ${{ secrets.BARCO_KEY_ALIAS }}
+          BARCO_KEY_PASSWORD: ${{ secrets.BARCO_KEY_PASSWORD }}
+        run: |
+          if [ -z "$BARCO_KEYSTORE_BASE64" ] || [ -z "$BARCO_KEYSTORE_PASSWORD" ] || [ -z "$BARCO_KEY_ALIAS" ] || [ -z "$BARCO_KEY_PASSWORD" ]; then
+            echo "Faltan los secretos de firma BARCO_KEYSTORE_BASE64, BARCO_KEYSTORE_PASSWORD, BARCO_KEY_ALIAS y BARCO_KEY_PASSWORD." >&2
+            exit 1
+          fi
+          mkdir -p "$RUNNER_TEMP/barco-signing"
+          echo "$BARCO_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/barco-signing/barco-release.jks"
+          echo "BARCO_KEYSTORE_PATH=$RUNNER_TEMP/barco-signing/barco-release.jks" >> "$GITHUB_ENV"
+
+      - name: Compilar APK firmado
+        working-directory: app/android
+        env:
+          BARCO_KEYSTORE_PASSWORD: ${{ secrets.BARCO_KEYSTORE_PASSWORD }}
+          BARCO_KEY_ALIAS: ${{ secrets.BARCO_KEY_ALIAS }}
+          BARCO_KEY_PASSWORD: ${{ secrets.BARCO_KEY_PASSWORD }}
+        run: |
+          VERSION_NAME="${GITHUB_REF_NAME#v}"
+          ./gradlew --no-daemon assembleRelease \
+            -PbarcoVersionCode="$GITHUB_RUN_NUMBER" \
+            -PbarcoVersionName="$VERSION_NAME"
+          cp app/build/outputs/apk/release/app-release.apk "$RUNNER_TEMP/Barco-${GITHUB_REF_NAME}.apk"
+
+      - name: Preparar firmware para descargar
+        run: |
+          cp firmware/arduino/barco_control/barco_control.ino "$RUNNER_TEMP/barco_control.ino"
+          mkdir -p "$RUNNER_TEMP/firmware/barco_control"
+          cp firmware/arduino/barco_control/barco_control.ino "$RUNNER_TEMP/firmware/barco_control/barco_control.ino"
+          (cd "$RUNNER_TEMP/firmware" && zip -qr "$RUNNER_TEMP/Barco-Firmware-${GITHUB_REF_NAME}.zip" barco_control)
+
+      - name: Crear GitHub Release con el APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            "$RUNNER_TEMP/Barco-${GITHUB_REF_NAME}.apk" \
+            "$RUNNER_TEMP/barco_control.ino" \
+            "$RUNNER_TEMP/Barco-Firmware-${GITHUB_REF_NAME}.zip" \
+            --verify-tag \
+            --title "Barco ${GITHUB_REF_NAME}" \
+            --generate-notes
