@@ -18,13 +18,3 @@ Esto se hace desde una computadora con Arduino IDE y conectada al Arduino por US
 1. Abre **Releases** y descarga `Barco-Firmware-v....zip` de la misma versión. También está disponible `barco_control.ino` suelto.
 2. Extrae el ZIP y abre `barco_control/barco_control.ino` con Arduino IDE.
 3. Conecta el Arduino, selecciona **Arduino Uno** y el puerto que aparece, y pulsa **Subir** (flecha hacia la derecha).
-
-**Antes de probar el motor, retira la hélice.** Si Arduino IDE indica que falta NeoSWSerial, pide ayuda a la persona encargada para instalar esa biblioteca una sola vez.
-
-## Ayuda
-
-Si la app no encuentra el HC-06, comprueba que el módulo esté emparejado en los ajustes Bluetooth de Android y vuelve a buscarlo desde la app. Para problemas con la carga del Arduino, consulta a la persona encargada del proyecto.
-
-## Para quienes mantienen el proyecto
-
-La app se compila automáticamente al crear una versión en GitHub. Para los detalles técnicos, los scripts y cómo crear una versión, consulta [la guía técnica](docs/GUIA_TECNICA.md). Las precauciones de hardware están en [la guía del firmware](docs/GUIA_FIRMWARE.md).
