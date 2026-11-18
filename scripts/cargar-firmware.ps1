@@ -1,4 +1,4 @@
-param(
+﻿param(
   [string]$Port
 )
 
@@ -6,7 +6,7 @@ $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'project-paths.ps1')
 
 # Cambia esta constante para listar los .ino de otra carpeta de firmwares.
-Set-Variable -Name FirmwareFolder -Option Constant -Scope Script -Value 'firmware\arduino\barco_control'
+Set-Variable -Name FirmwareFolder -Option Constant -Scope Script -Value 'firmware\arduino'
 $firmwarePath = Join-Path $script:BarcoProjectRoot $script:FirmwareFolder
 $fqbn = 'arduino:avr:uno'
 

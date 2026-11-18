@@ -5,10 +5,10 @@ def barcoVersionName = providers.gradleProperty('barcoVersionName').getOrElse('2
 def barcoKeystorePath = System.getenv('BARCO_KEYSTORE_PATH')
 
 android {
-    namespace = "com.mario.barco.test"
+    namespace = "com.mario.barco"
     compileSdk = rootProject.ext.compileSdkVersion
     defaultConfig {
-        applicationId "com.mario.barco.test"
+        applicationId "com.mario.barco"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode barcoVersionCode

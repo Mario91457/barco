@@ -4,11 +4,11 @@
 
 - App: `app/src/index.html`, `app/src/main.js`, `app/src/instrumentos.js` y `app/src/assets/barco.svg`.
 - Proyecto Android/Capacitor: `app/android/` y `app/capacitor.config.json`.
-- Firmware: `firmware/arduino/barco_control/barco_control.ino`.
-- Prueba host del protocolo: `firmware/arduino/tests/host_protocolo/` (mocks; no sustituye hardware).
-- Prueba PWM que debe conservarse: `firmware/arduino/tests/prueba_pwm_hardware_vs_servo/prueba_pwm_hardware_vs_servo.ino`.
-- Documentación para participantes: `README.md`; mantenimiento/compilación: `docs/GUIA_TECNICA.md`; guía del firmware: `docs/GUIA_FIRMWARE.md`.
-- `docs/referencia-app-web-v1/`, `docs/README_ESTABLE_V1.md` y `docs/firmware/diagnostico_tirones_mpu6500.md` son referencias históricas, no fuentes activas.
+- Firmware: `firmware/arduino/barco_control.ino`.
+- Prueba host del protocolo: `firmware/tests/host_protocolo/` (mocks; no sustituye hardware).
+- Prueba PWM que debe conservarse: `firmware/tests/prueba_pwm_hardware_vs_servo/prueba_pwm_hardware_vs_servo.ino`.
+- Documentación para participantes: `README.md`; compilación local de la app: `docs/build.md`; guía del firmware: `docs/GUIA_FIRMWARE.md`.
+- `docs/firmware/diagnostico_tirones_mpu6500.md` es una referencia histórica, no una fuente activa.
 
 Antes de cambiar app o firmware, revisa este archivo y la documentación relacionada. Edita `app/src/`, no `app/www/`, que se genera al compilar.
 
@@ -46,6 +46,6 @@ Antes de cambiar app o firmware, revisa este archivo y la documentación relacio
 - Tras cambios al firmware, ejecuta la prueba host y compila para Uno; después sigue la prueba de banco del README. Las pruebas de PC no prueban el hardware.
 - No afirmes ausencia de tirones, signos correctos o failsafe real sin prueba física. La prueba del motor requiere hélice retirada.
 - No incluyas cachés, APKs, salidas generadas, credenciales ni configuración local. Revisa `git status` antes de preparar un commit.
-- La app usa el ID de prueba `com.mario.barco.test`. El flujo `.github/workflows/android-release.yml` crea el APK y adjunta un ZIP de sketch en etiquetas `v*`; nunca guardes el keystore ni contraseñas de firma en el repositorio. El flujo no carga firmware a una placa.
+- La app usa el ID `com.mario.barco`. El flujo `.github/workflows/android-release.yml` crea el APK y adjunta un ZIP de sketch en etiquetas `v*`; nunca guardes el keystore ni contraseñas de firma en el repositorio. El flujo no carga firmware a una placa.
 - No publiques, subas firmware ni instales APK en dispositivos como parte de una tarea de documentación, salvo que el usuario lo solicite expresamente.
-- Mantén `README.md`, `docs/GUIA_TECNICA.md` y `docs/GUIA_FIRMWARE.md` consistentes.
+- Mantén `README.md`, `docs/build.md` y `docs/GUIA_FIRMWARE.md` consistentes.

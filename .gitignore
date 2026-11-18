@@ -25,4 +25,4 @@
 *.log
 **/.DS_Store
 **/Thumbs.db
-firmware/arduino/tests/host_protocolo/frames.h
+firmware/tests/host_protocolo/frames.h

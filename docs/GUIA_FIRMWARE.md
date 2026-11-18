@@ -1,69 +1,52 @@
-# Guía de compilación y prueba del firmware
+# Guía del firmware: cableado y Arduino IDE
 
-Sketch activo: `firmware/arduino/barco_control/barco_control.ino`. Esta guía está dirigida al Arduino Uno/ATmega328P a 16 MHz.
+Sketch activo en el repositorio: `firmware/arduino/barco_control.ino`. El hardware objetivo es Arduino Uno/ATmega328P a 16 MHz.
 
-## Hardware y seguridad
+## Conexiones del cableado
 
-- HC-06: RX de NeoSWSerial en D5, TX en D6, 9600 baudios.
-- ESC D9/OC1A, servo D10/OC1B.
-- MPU6500 SDA=A4, SCL=A5, dirección I²C `0x68`.
-- Timer1 genera PWM de 50 Hz en D9 y D10. No uses `Servo.h` ni reconfigures Timer1.
-- Retira la hélice antes de alimentar o probar el motor. Confirma el pulso de parada y el ajuste `ESC_BIDIRECTIONAL` para el ESC real.
+| Módulo | Conexión al Arduino Uno | Detalle |
+| --- | --- | --- |
+| HC-06 | TXD → D5; RXD ← D6 | D5 es RX y D6 TX de NeoSWSerial; 9600 baudios. |
+| ESC | Señal → D9 (OC1A) | Salida PWM de control del motor. |
+| Servo del timón | Señal → D10 (OC1B) | Salida PWM de dirección. |
+| MPU6500 | SDA → A4; SCL → A5 | I²C en la dirección `0x68`. |
+| Tierra común | GND del Arduino con GND del HC-06, ESC, servo y MPU6500 | Todos deben compartir referencia de tierra. |
 
-## Instalar Arduino CLI y dependencias
+La lista indica las señales usadas por el firmware. La tensión de alimentación y los cables de potencia dependen de las placas y del ESC concretos; comprueba sus etiquetas y documentación antes de conectarlos. El firmware no determina esos voltajes.
 
-Instala Arduino CLI y agrega `arduino-cli` al `PATH`. Instala el core AVR y NeoSWSerial una sola vez:
+El Timer1 del Uno genera PWM de 50 Hz en D9 y D10. No uses `Servo.h`, `analogWrite()` en esos pines ni otra función que reconfigure Timer1.
 
-```powershell
-arduino-cli core update-index
-arduino-cli core install arduino:avr
-arduino-cli lib install NeoSWSerial
-```
+## Preparar Arduino IDE
 
-Verifica con `arduino-cli core list` y `arduino-cli lib list`.
+1. Instala [Arduino IDE](https://support.arduino.cc/hc/en-us/articles/360019833020-Download-and-install-Arduino-IDE).
+2. Instala la biblioteca **NeoSWSerial** desde **Herramientas → Administrar bibliotecas…** (o el icono de Library Manager), busca `NeoSWSerial` y pulsa **Instalar**. Consulta la [guía oficial para instalar bibliotecas](https://support.arduino.cc/hc/en-us/articles/5145457742236-Install-libraries-in-the-Arduino-IDE).
+3. Descarga `Barco-Firmware-v....zip` desde [Releases](https://github.com/Mario91457/barco/releases), extráelo y abre `barco_control/barco_control.ino` en Arduino IDE. Esa carpeta y el archivo principal tienen el mismo nombre, como requiere la estructura de un sketch de Arduino.
+
+Si vas a compilar una copia del repositorio, el archivo activo está en `firmware/arduino/barco_control.ino`. Para abrirlo con Arduino IDE, copia el archivo en una carpeta aparte llamada `barco_control` y abre `barco_control/barco_control.ino`; conserva intacta la copia del repositorio. Consulta la [guía de inicio de Arduino IDE 2](https://docs.arduino.cc/software/ide-v2/tutorials/getting-started-ide-v2/).
 
 ## Compilar y cargar
 
-La carga manual compila el sketch activo así:
-
-```powershell
-arduino-cli compile --fqbn arduino:avr:uno .\firmware\arduino\barco_control
-arduino-cli board list
-arduino-cli upload --fqbn arduino:avr:uno --port COM3 .\firmware\arduino\barco_control
-```
-
-Sustituye `COM3` por el puerto real. Cierra el Monitor Serie y cualquier programa que use ese puerto.
-
-En Windows también puedes ejecutar `scripts/cargar-firmware.cmd`. El cargador lista los `.ino` de la carpeta indicada por la constante `FirmwareFolder` en `scripts/cargar-firmware.ps1`; por defecto es `firmware/arduino/barco_control`. Selecciona el número, verifica el nombre mostrado y confirma la carga escribiendo `SI`. Para pasar el puerto: `scripts/cargar-firmware.ps1 -Port COM3`.
-
-El cargador prepara el `.ino` elegido en una carpeta temporal para que sketches de una misma carpeta no se mezclen durante la compilación. La carga reinicia la placa; el arranque y calibración tardan varios segundos.
-
-## Prueba de escritorio del protocolo
-
-Desde Git Bash o WSL, en la raíz del proyecto:
-
-```bash
-bash firmware/arduino/tests/host_protocolo/run.sh
-```
-
-Se requiere Bash, `g++` y Node.js. Los mocks ejercitan el parser y el comportamiento del protocolo en PC; no sustituyen la prueba de hardware.
+1. En el selector de placa, elige **Arduino Uno**. Si no aparece, abre **Boards Manager**, instala **Arduino AVR Boards** y vuelve a elegir **Arduino Uno**.
+2. En **Herramientas → Puerto**, selecciona el puerto COM del Arduino. Cierra el Monitor Serie y cualquier otro programa que lo esté usando.
+3. Pulsa **Verificar** (✓) para compilar. Si no hay errores, pulsa **Subir** (→) para cargar el programa.
+4. Espera a que Arduino IDE indique que la carga terminó. El reinicio y la calibración inicial tardan varios segundos.
 
 ## Prueba de banco
 
-Después de cambiar el firmware, compila para Uno y verifica con la hélice retirada:
+Después de cargar cambios, verifica con la hélice retirada:
 
 1. Confirma que el ESC permanece detenido al encender, tras `S` y cuando vence el failsafe avanzado (`FAILSAFE_MS`, 1,6 s sin órdenes avanzadas de control).
-2. Verifica servo, centro y límites de ángulo; el brazo no debe forzar los topes.
+2. Verifica el centro y los límites del servo; el brazo no debe forzar los topes.
 3. Gira el barco a mano en sentido horario: yaw debe aumentar. Eleva la proa: pitch positivo. Inclina estribor hacia abajo: roll positivo.
 4. Activa crucero con el barco inmóvil; al girarlo a mano, el timón debe oponerse al giro. No navegues si la corrección va en el mismo sentido.
 5. Comprueba `CAL` con el barco inmóvil y que el watchdog reinicie la placa si el loop deja de avanzar.
 
-No afirmes que el hardware está verificado solo por compilar o pasar los mocks. El ESC concreto, el sentido real del timón, los signos del MPU y el failsafe requieren pruebas físicas controladas.
+Una compilación correcta en Arduino IDE no verifica el ESC, el sentido real del timón, los signos del MPU ni el failsafe físico. Esas comprobaciones requieren una prueba controlada en el barco.
 
 ## Errores comunes
 
-- **`arduino-cli` no se encuentra:** instala Arduino CLI y actualiza el `PATH`.
-- **Falta `NeoSWSerial.h`:** instala la biblioteca con `arduino-cli lib install NeoSWSerial`.
-- **No aparece el puerto:** usa un cable USB de datos, revisa el Administrador de dispositivos y el driver del conversor USB-serie.
-- **Puerto ocupado:** cierra Arduino IDE, Monitor Serie y otras aplicaciones serie.
-- **Falla al cargar:** confirma `arduino:avr:uno`, el puerto y el cable; vuelve a intentar RESET si la placa no sincroniza.
+- **Falta `NeoSWSerial.h`:** instálala desde Library Manager y vuelve a compilar.
+- **No aparece Arduino Uno:** instala **Arduino AVR Boards** desde Boards Manager.
+- **No aparece el puerto:** usa un cable USB de datos y revisa el Administrador de dispositivos y el controlador USB-serie.
+- **Puerto ocupado:** cierra el Monitor Serie y otras aplicaciones que usen ese puerto.
+- **El sketch no abre o no compila por su carpeta:** confirma que la carpeta se llame `barco_control` y que dentro esté `barco_control.ino`.

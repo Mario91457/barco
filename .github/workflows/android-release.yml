@@ -68,7 +68,7 @@ jobs:
       - name: Preparar firmware para descargar
         run: |
           mkdir -p "$RUNNER_TEMP/firmware/barco_control"
-          cp firmware/arduino/barco_control/barco_control.ino "$RUNNER_TEMP/firmware/barco_control/barco_control.ino"
+          cp firmware/arduino/barco_control.ino "$RUNNER_TEMP/firmware/barco_control/barco_control.ino"
           (cd "$RUNNER_TEMP/firmware" && zip -qr "$RUNNER_TEMP/Barco-Firmware-${GITHUB_REF_NAME}.zip" barco_control)
 
       - name: Crear GitHub Release con el APK

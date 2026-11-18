@@ -1,7 +1,7 @@
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 // Genera frames.h con tramas calculadas por el checksumXor REAL de src/main.js.
-const src = fs.readFileSync(fileURLToPath(new URL('../../../../app/src/main.js', import.meta.url)),'utf8');
+const src = fs.readFileSync(fileURLToPath(new URL('../../../app/src/main.js', import.meta.url)),'utf8');
 const m = /function checksumXor\(orden\) \{[\s\S]*?\n    \}/.exec(src);
 const checksumXor = eval('(' + m[0].replace('function checksumXor','function') + ')');
 const enc = o => `${o}*${checksumXor(o)}\n`;

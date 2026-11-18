@@ -1,4 +1,4 @@
-package com.mario.barco.test;
+package com.mario.barco;
 
 import com.getcapacitor.BridgeActivity;
 

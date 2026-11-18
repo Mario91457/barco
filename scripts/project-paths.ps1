@@ -1,4 +1,4 @@
-$script:BarcoProjectRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+﻿$script:BarcoProjectRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 
 function Get-AndroidProject {
   $wrappers = @(Get-ChildItem -LiteralPath $script:BarcoProjectRoot -Recurse -File -Filter 'gradlew.bat' -ErrorAction SilentlyContinue |
