@@ -15,6 +15,6 @@ La app se distribuye como una versión de prueba separada de la app anterior. Pa
 
 Esto se hace desde una computadora con Arduino IDE y conectada al Arduino por USB:
 
-1. Abre **Releases** y descarga `Barco-Firmware-v....zip` de la misma versión. También está disponible `barco_control.ino` suelto.
+1. Abre **Releases** y descarga `Barco-Firmware-v....zip` de la misma versión.
 2. Extrae el ZIP y abre `barco_control/barco_control.ino` con Arduino IDE.
 3. Conecta el Arduino, selecciona **Arduino Uno** y el puerto que aparece, y pulsa **Subir** (flecha hacia la derecha).

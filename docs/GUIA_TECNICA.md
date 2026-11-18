@@ -23,7 +23,7 @@ La app web se edita en `app/src/`; `app/www/` es salida generada. El plugin Blue
 
 ## APK de Releases con GitHub Actions
 
-El flujo `.github/workflows/android-release.yml` se ejecuta al subir una etiqueta que empiece con `v`, por ejemplo `v1.0.0`. Compila la app web, sincroniza Capacitor, compila el APK Android firmado y crea un GitHub Release con `Barco-v1.0.0.apk`, el sketch `barco_control.ino` y `Barco-Firmware-v1.0.0.zip` (la carpeta de sketch lista para abrir). La app conserva el ID de prueba `com.mario.barco.test`; no reemplaza una app instalada con otro ID. El flujo no carga firmware en una placa.
+El flujo `.github/workflows/android-release.yml` se ejecuta al subir una etiqueta que empiece con `v`, por ejemplo `v1.0.0`. Compila la app web, sincroniza Capacitor, compila el APK Android firmado y crea un GitHub Release con `Barco-v1.0.0.apk` y `Barco-Firmware-v1.0.0.zip` (la carpeta de sketch lista para abrir). La app conserva el ID de prueba `com.mario.barco.test`; no reemplaza una app instalada con otro ID. El flujo no carga firmware en una placa.
 
 ### Preparar una vez la firma
 
@@ -62,7 +62,7 @@ git tag -a v1.0.0 -m "Barco RC v1.0.0"
 git push origin v1.0.0
 ```
 
-Usa un número nuevo para cada versión. La acción aparece en **Actions**; al terminar, abre **Releases** y confirma que incluya el APK, el `.ino` y el ZIP del sketch. La versión de Android toma el nombre de la etiqueta y un código creciente del número de ejecución. La acción necesita `contents: write` para crear el Release ([permisos del workflow](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax)); limita ese permiso al flujo de etiquetas. El comando que adjunta los archivos es `gh release create` ([manual](https://cli.github.com/manual/gh_release_create)).
+Usa un número nuevo para cada versión. La acción aparece en **Actions**; al terminar, abre **Releases** y confirma que incluya el APK y el ZIP del sketch. La versión de Android toma el nombre de la etiqueta y un código creciente del número de ejecución. La acción necesita `contents: write` para crear el Release ([permisos del workflow](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax)); limita ese permiso al flujo de etiquetas. El comando que adjunta los archivos es `gh release create` ([manual](https://cli.github.com/manual/gh_release_create)).
 
 Si la acción falla, abre **Actions**, entra a la ejecución y revisa el paso rojo. Los secretos de firma son obligatorios. No vuelvas a usar una etiqueta publicada para otro APK; crea una etiqueta nueva.
 

@@ -46,6 +46,6 @@ Antes de cambiar app o firmware, revisa este archivo y la documentación relacio
 - Tras cambios al firmware, ejecuta la prueba host y compila para Uno; después sigue la prueba de banco del README. Las pruebas de PC no prueban el hardware.
 - No afirmes ausencia de tirones, signos correctos o failsafe real sin prueba física. La prueba del motor requiere hélice retirada.
 - No incluyas cachés, APKs, salidas generadas, credenciales ni configuración local. Revisa `git status` antes de preparar un commit.
-- La app usa el ID de prueba `com.mario.barco.test`. El flujo `.github/workflows/android-release.yml` crea el APK y adjunta el `.ino` activo y un ZIP de sketch en etiquetas `v*`; nunca guardes el keystore ni contraseñas de firma en el repositorio. El flujo no carga firmware a una placa.
+- La app usa el ID de prueba `com.mario.barco.test`. El flujo `.github/workflows/android-release.yml` crea el APK y adjunta un ZIP de sketch en etiquetas `v*`; nunca guardes el keystore ni contraseñas de firma en el repositorio. El flujo no carga firmware a una placa.
 - No publiques, subas firmware ni instales APK en dispositivos como parte de una tarea de documentación, salvo que el usuario lo solicite expresamente.
 - Mantén `README.md`, `docs/GUIA_TECNICA.md` y `docs/GUIA_FIRMWARE.md` consistentes.
